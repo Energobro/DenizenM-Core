@@ -13,12 +13,14 @@ import com.denizenscript.denizencore.utilities.scheduling.OneTimeSchedulable;
 import com.denizenscript.denizencore.utilities.scheduling.Schedulable;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
-    protected static long total_queues = 0;
+    protected static final AtomicLong total_queues = new AtomicLong();
 
     public static String getStats() {
         String c1 = DenizenCore.implementation.applyDebugColors("<W>"), c2 = DenizenCore.implementation.applyDebugColors("<A>");
@@ -36,7 +38,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             }
         }
         return "Total number of queues created: "
-                + total_queues
+                + total_queues.get()
                 + ", currently active queues: "
                 + allQueues.size() + ",\n" + String.join("", statsSet.stream().map(Map.Entry::getValue).collect(Collectors.joining()));
     }
@@ -56,7 +58,8 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         return allQueues.get(id);
     }
 
-    protected static LinkedHashMap<String, ScriptQueue> allQueues = new LinkedHashMap<>();
+    /** All currently running queues. Concurrent, as queues may be started/stopped from async threads. */
+    protected static Map<String, ScriptQueue> allQueues = new ConcurrentHashMap<>();
 
     public static Collection<ScriptQueue> getQueues() {
         return allQueues.values();
@@ -101,9 +104,9 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     public ScriptQueue replacementQueue = null;
 
-    public boolean is_stopping = false;
+    public volatile boolean is_stopping = false;
 
-    public boolean isStopped = false;
+    public volatile boolean isStopped = false;
 
     public volatile ScriptEntry holdingOn = null;
 
@@ -113,7 +116,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
      */
     public boolean waitWhenEmpty = false;
 
-    public boolean is_started;
+    public volatile boolean is_started;
 
     public long startTime = 0;
 
@@ -124,9 +127,56 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     public long numericId;
 
     protected ScriptQueue(String id) {
-        numericId = total_queues++;
+        numericId = total_queues.getAndIncrement();
         this.id = id;
         generateId(id, numericId, 0);
+    }
+
+    // <--[language]
+    // @name Async Queues
+    // @group Script Command System
+    // @description
+    // Normally, all script queues run on the server's main thread: one command at a time, in lock-step with the rest of the server.
+    // An "async queue" instead runs its commands on a separate thread, meaning the script's own logic (tags, math, text handling, ...)
+    // does not consume main thread time, and a slow script cannot lag the server.
+    //
+    // Async queues are created by the "async" argument of <@link command run>, or by the DenizenCore API (see 'ScriptUtilities.createAndStartQueueAsync').
+    //
+    // Commands are marked internally as async-safe or not. Any command that is not async-safe is automatically handed to the main thread
+    // and the async queue simply waits for it to complete - so scripts remain correct, they just don't gain any speed from those commands.
+    // Most queue/logic commands (define, if, foreach, while, repeat, choose, wait, ...) are async-safe.
+    //
+    // Note that most tags are safe to read from an async queue, but tags that read live server/world state may return slightly outdated data,
+    // or in rare cases may error, as the main thread can be modifying that data at the same moment.
+    //
+    // See also <@link language ~waitable> for the simpler option of just moving a single command off-thread with the "~" prefix.
+    // -->
+
+    /** Returns true if this queue runs its script entries on a thread other than the main thread. */
+    public boolean isAsync() {
+        return false;
+    }
+
+    /** The thread that currently executes this queue's script entries, or null if it isn't currently running anywhere. */
+    public Thread getOwnerThread() {
+        return DenizenCore.MAIN_THREAD;
+    }
+
+    /** Returns true if the calling thread is the thread that owns/executes this queue. */
+    public boolean isOnOwnerThread() {
+        return DenizenCore.isMainThread();
+    }
+
+    /**
+     * Runs a task on the thread that owns this queue (immediately if already on it, otherwise as soon as that thread is available).
+     * Use this whenever an async operation needs to hand a result back to a queue.
+     */
+    public void runOnQueueThread(Runnable run) {
+        DenizenCore.runOnMainThread(run);
+    }
+
+    /** Wakes this queue up if it's sleeping between revolutions. No-op for main thread queues (which tick with the server). */
+    public void wake() {
     }
 
     public final void setContextSource(ContextSource source) {
@@ -299,13 +349,13 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (script_entries.isEmpty() && holdingOn == null) {
             return;
         }
-        if (CoreConfiguration.verifyThreadMatches && !DenizenCore.isMainThread()) {
-            try {
-                throw new RuntimeException("Invalid thread access - starting queue from thread " + Thread.currentThread());
+        if (!isOnOwnerThread()) {
+            // Queue was started from the wrong thread (eg a main-thread queue started by async code) - hand it to the thread that actually owns it.
+            if (CoreConfiguration.verifyThreadMatches) {
+                Debug.verboseLog("Queue '" + id + "' was started from thread '" + Thread.currentThread().getName() + "', moving the start to its owner thread.");
             }
-            catch (Throwable ex) {
-                Debug.echoError(ex);
-            }
+            runOnQueueThread(() -> start(doBasicConfig));
+            return;
         }
         allQueues.put(id, this);
         is_started = true;
@@ -372,13 +422,10 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (is_stopping) {
             return;
         }
-        if (CoreConfiguration.verifyThreadMatches && !DenizenCore.isMainThread()) {
-            try {
-                throw new RuntimeException("Invalid thread access - stopping queue from thread " + Thread.currentThread());
-            }
-            catch (Throwable ex) {
-                Debug.echoError(ex);
-            }
+        if (!isOnOwnerThread()) {
+            // Stop was requested by a different thread - let the owner thread handle it, so it can't stop mid-command.
+            runOnQueueThread(this::stop);
+            return;
         }
         if (queueNeedsToDebug()) {
             queueDebug("Completing queue '<QUEUE>' in <A>" + ((System.nanoTime() - startTime) / 1000000) + "<O>ms.");

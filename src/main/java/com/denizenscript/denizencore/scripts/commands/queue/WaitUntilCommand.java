@@ -24,6 +24,7 @@ public class WaitUntilCommand extends AbstractCommand implements Holdable {
         forceHold = true;
         isProcedural = false; // A procedure can't wait
         autoCompile();
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]

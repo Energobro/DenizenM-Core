@@ -220,6 +220,41 @@ public abstract class AbstractCommand {
      */
     public boolean isProcedural = false;
 
+    /**
+     * Whether this command is safe to execute on a thread other than the main thread.
+     * <p>
+     * When an async queue (see <@link language Async Queues>) reaches a command that is not async-safe,
+     * the command is automatically executed on the main thread instead, with the async queue waiting for it to finish.
+     * <p>
+     * Only set this true for commands that exclusively touch their own queue and thread-safe data.
+     * Anything that reads or writes live server/world state must stay false.
+     */
+    public boolean asyncSafe = false;
+
+    /**
+     * Whether this command should move its own execution (including its tag parsing) to a separate thread when it's '~' waited for.
+     * <p>
+     * This is what makes "- ~define x &lt;some.slow.tag&gt;" run off-thread: the queue holds until the command completes,
+     * and the rest of the server keeps running in the meantime.
+     * <p>
+     * Requires {@link #asyncSafe}, and requires the command to be {@link Holdable}.
+     * The command executor marks the entry finished automatically once execution returns, so such commands don't need to call setFinished themselves.
+     */
+    public boolean runAsyncWhenWaited = false;
+
+    /** Marks this command as safe to run off the main thread. See {@link #asyncSafe}. */
+    public void setAsyncSafe(boolean safe) {
+        asyncSafe = safe;
+    }
+
+    /** Marks this command as one that runs off-thread when '~' waited for. See {@link #runAsyncWhenWaited}. */
+    public void setAsyncWaitable(boolean waitable) {
+        runAsyncWhenWaited = waitable;
+        if (waitable) {
+            asyncSafe = true;
+        }
+    }
+
     public void setRequiredArguments(int min, int max) {
         minimumArguments = min;
         maximumArguments = max == -1 ? Integer.MAX_VALUE : max;

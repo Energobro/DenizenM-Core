@@ -210,6 +210,17 @@ public class QueueTag implements ObjectTag, Adjustable, FlaggableObject {
         });
 
         // <--[tag]
+        // @attribute <QueueTag.is_async>
+        // @returns ElementTag(Boolean)
+        // @description
+        // Returns true if the queue runs on a separate thread rather than the server's main thread.
+        // Refer to <@link language Async Queues>.
+        // -->
+        tagProcessor.registerTag(ElementTag.class, "is_async", (attribute, object) -> {
+            return new ElementTag(object.getQueue().isAsync());
+        });
+
+        // <--[tag]
         // @attribute <QueueTag.state>
         // @returns ElementTag
         // @description

@@ -21,13 +21,21 @@ public class ScriptEngine {
         return true;
     }
 
+    /** Prepares an entry for execution within its queue, including giving it isolated internals if the queue runs off-thread. */
+    static void prepareEntry(ScriptQueue scriptQueue, ScriptEntry scriptEntry) {
+        if (scriptQueue.isAsync()) {
+            scriptEntry.makeAsyncSafe();
+        }
+        scriptEntry.setSendingQueue(scriptQueue);
+        scriptEntry.updateContext();
+    }
+
     public static void revolveOnceForce(ScriptQueue scriptQueue) {
         ScriptEntry scriptEntry = scriptQueue.getNext();
         if (scriptEntry == null) {
             return;
         }
-        scriptEntry.setSendingQueue(scriptQueue);
-        scriptEntry.updateContext();
+        prepareEntry(scriptQueue, scriptEntry);
         scriptQueue.setLastEntryExecuted(scriptEntry);
         if (scriptEntry.internal.waitfor) {
             scriptQueue.holdingOn = scriptEntry;
@@ -47,8 +55,7 @@ public class ScriptEngine {
         }
         ScriptEntry scriptEntry = scriptQueue.getNext();
         while (scriptEntry != null) {
-            scriptEntry.setSendingQueue(scriptQueue);
-            scriptEntry.updateContext();
+            prepareEntry(scriptQueue, scriptEntry);
             scriptQueue.setLastEntryExecuted(scriptEntry);
             if (scriptEntry.internal.waitfor) {
                 scriptQueue.holdingOn = scriptEntry;

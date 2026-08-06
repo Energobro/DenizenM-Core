@@ -9,6 +9,8 @@ import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
 import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ReplaceableTagEvent {
 
@@ -48,7 +50,8 @@ public class ReplaceableTagEvent {
 
     public ReferenceData mainRef = null;
 
-    public static HashMap<String, ReferenceData> refs = new HashMap<>();
+    /** Cache of pre-parsed tag reference data. Concurrent, as tags can be parsed from async queues. */
+    public static Map<String, ReferenceData> refs = new ConcurrentHashMap<>();
 
     public ReplaceableTagEvent(ReferenceData ref, String tag, TagContext context) {
         // If tag is not replaced, return the tag

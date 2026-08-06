@@ -7,12 +7,13 @@ import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.objects.core.QueueTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
+import com.denizenscript.denizencore.scripts.commands.Holdable;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
 import java.util.Map;
 
-public class DefineMapCommand extends AbstractCommand {
+public class DefineMapCommand extends AbstractCommand implements Holdable {
 
     public DefineMapCommand() {
         setName("definemap");
@@ -21,6 +22,7 @@ public class DefineMapCommand extends AbstractCommand {
         isProcedural = true;
         allowedDynamicPrefixes = true;
         anyPrefixSymbolAllowed = true;
+        setAsyncWaitable(true);
     }
 
     // <--[command]
@@ -34,6 +36,9 @@ public class DefineMapCommand extends AbstractCommand {
     //
     // @Description
     // Creates a MapTag definition with key/value pairs constructed from the input arguments.
+    //
+    // Like <@link command define>, this command is ~waitable, which runs the command (including parsing the tags in its values) on a separate thread.
+    // Refer to <@link language ~waitable>, and to the notes in the 'define' command's description about when that's worth doing.
     //
     // @Tags
     // <[<id>]> to get the value assigned to an ID

@@ -28,11 +28,12 @@ public class TimedQueue extends ScriptQueue {
         }
     }
 
-    private long ticks;
+    /** How many ticks to wait between revolutions. 0 or less means "instant" (run the whole queue at once). */
+    public long ticks;
 
-    protected boolean paused = false;
+    protected volatile boolean paused = false;
 
-    public DelayTracker delay;
+    public volatile DelayTracker delay;
 
     public void delayFor(DurationTag duration) {
         delay = new DeltaTimeDelayTracker(duration.getMillis());
@@ -108,7 +109,13 @@ public class TimedQueue extends ScriptQueue {
         if (script_entries.isEmpty() && holdingOn == null) {
             return;
         }
-        DenizenCore.timedQueues.add(this);
+        if (DenizenCore.isMainThread()) {
+            DenizenCore.timedQueues.add(this);
+        }
+        else {
+            // The main thread's queue list isn't thread-safe, so let it pick this up at the start of its next tick.
+            DenizenCore.pendingTimedQueues.add(this);
+        }
     }
 
     /**

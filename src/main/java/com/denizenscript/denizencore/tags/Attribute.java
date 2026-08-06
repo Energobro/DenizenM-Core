@@ -11,6 +11,7 @@ import com.denizenscript.denizencore.utilities.DefinitionProvider;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class Attribute {
 
@@ -48,7 +49,8 @@ public class Attribute {
         }
     }
 
-    public static HashMap<String, AttributeComponent[]> attribsLookup = new HashMap<>();
+    /** Cache of parsed attribute chains. Concurrent, as tags can be parsed from async queues. */
+    public static Map<String, AttributeComponent[]> attribsLookup = new ConcurrentHashMap<>();
 
     private static boolean isNumber(char c) {
         return c >= '0' && c <= '9';

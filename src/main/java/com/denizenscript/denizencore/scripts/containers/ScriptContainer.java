@@ -362,7 +362,8 @@ public class ScriptContainer implements Debuggable {
         return got;
     }
 
-    private Map<String, ScriptEntrySet> scriptsMap = new HashMap<>();
+    /** Cache of built script entry sets per path. Concurrent, as scripts can be launched from other threads. */
+    private final Map<String, ScriptEntrySet> scriptsMap = new java.util.concurrent.ConcurrentHashMap<>();
 
     /////////////
     // DEBUGGABLE

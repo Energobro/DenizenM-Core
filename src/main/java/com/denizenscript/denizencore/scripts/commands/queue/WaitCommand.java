@@ -17,6 +17,7 @@ public class WaitCommand extends AbstractCommand {
         setRequiredArguments(0, 3);
         isProcedural = false; // A procedure can't wait
         autoCompile();
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]
@@ -78,12 +79,18 @@ public class WaitCommand extends AbstractCommand {
         else {
             tracker = new TimedQueue.DeltaTimeDelayTracker(delay.getMillis());
         }
-        if (queue.queue instanceof TimedQueue) {
-            ((TimedQueue) queue.queue).delay = tracker;
+        ScriptQueue target = queue.queue;
+        if (target instanceof TimedQueue timedTarget) {
+            timedTarget.delay = tracker; // Volatile write - safe to apply to another thread's queue.
+            return;
+        }
+        scriptEntry.setInstant(false);
+        if (target.isOnOwnerThread()) {
+            target.forceToTimed(tracker);
         }
         else {
-            scriptEntry.setInstant(false);
-            queue.queue.forceToTimed(tracker);
+            // Converting a queue to a timed queue rebuilds it, so it has to happen on the thread that owns the target queue.
+            target.runOnQueueThread(() -> target.forceToTimed(tracker));
         }
     }
 }

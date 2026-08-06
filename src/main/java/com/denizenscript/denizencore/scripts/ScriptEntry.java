@@ -87,6 +87,81 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         public Boolean shouldDebugBool = null;
 
         public int defObjects = 8;
+
+        /** If set, this internal data set is privately owned by that one ScriptEntry (for off-thread execution), rather than shared between clones. */
+        public ScriptEntry asyncOwner = null;
+
+        /**
+         * Creates a copy of this internal data with its own private argument objects.
+         * <p>
+         * Normally, cloned script entries share their internals (including the single reusable Argument object per raw argument),
+         * which is a major performance win but is only valid while every entry from a given script runs on one thread at a time.
+         * An entry that will run async needs its own copies, so that a parallel run of the same script can't overwrite its parsed argument values mid-command.
+         */
+        public ScriptEntryInternal duplicateForAsync() {
+            ScriptEntryInternal result = new ScriptEntryInternal();
+            result.command = command;
+            result.actualCommand = actualCommand;
+            result.pre_tagged_args = pre_tagged_args;
+            result.bracedSet = bracedSet;
+            result.raw_input_args = raw_input_args;
+            result.script = script;
+            result.yamlSubcontent = yamlSubcontent;
+            result.instant = instant;
+            result.waitfor = waitfor;
+            result.hasTags = hasTags;
+            result.specialProcessedData = specialProcessedData;
+            result.originalLine = originalLine;
+            result.lineNumber = lineNumber;
+            result.brokenArgs = brokenArgs;
+            result.argPrefixMap = argPrefixMap;
+            result.prefixedArgMapper = prefixedArgMapper;
+            result.enumVals = enumVals == null ? null : enumVals.clone();
+            result.booleans = booleans == null ? null : booleans.clone();
+            result.shouldDebugBool = shouldDebugBool;
+            result.defObjects = defObjects;
+            if (preprocArgs != null) {
+                result.preprocArgs = new ArrayList<>(preprocArgs.size());
+                for (Argument arg : preprocArgs) {
+                    result.preprocArgs.add(arg.clone());
+                }
+            }
+            IdentityHashMap<InternalArgument, InternalArgument> copies = new IdentityHashMap<>();
+            result.all_arguments = duplicateArguments(all_arguments, copies);
+            result.arguments_to_use = duplicateArguments(arguments_to_use, copies);
+            return result;
+        }
+
+        private static InternalArgument[] duplicateArguments(InternalArgument[] args, IdentityHashMap<InternalArgument, InternalArgument> copies) {
+            if (args == null) {
+                return null;
+            }
+            InternalArgument[] result = new InternalArgument[args.length];
+            for (int i = 0; i < args.length; i++) {
+                result[i] = duplicateArgument(args[i], copies);
+            }
+            return result;
+        }
+
+        private static InternalArgument duplicateArgument(InternalArgument arg, IdentityHashMap<InternalArgument, InternalArgument> copies) {
+            if (arg == null || arg == NULL_INTERNAL_ARGUMENT) { // The null placeholder is never parsed into, so it's safe to keep shared.
+                return arg;
+            }
+            InternalArgument existing = copies.get(arg);
+            if (existing != null) { // 'arguments_to_use' holds the same objects as 'all_arguments' - that relationship must be preserved.
+                return existing;
+            }
+            InternalArgument result = new InternalArgument();
+            copies.put(arg, result);
+            result.value = arg.value; // ParseableTag is read-only while parsing, so it's safe to share.
+            result.shouldParse = arg.shouldParse;
+            result.hadColon = arg.hadColon;
+            result.fullOriginalRawValue = arg.fullOriginalRawValue;
+            result.shouldUse = arg.shouldUse;
+            result.prefix = duplicateArgument(arg.prefix, copies);
+            result.aHArg = arg.aHArg == null ? null : arg.aHArg.clone();
+            return result;
+        }
     }
 
     public static class BooleanArg {
@@ -154,9 +229,23 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         }
     }
 
+    /**
+     * Gives this entry its own private copy of its internal argument data, so that it can safely be executed off the main thread.
+     * Called automatically for entries in async queues and for '~' waited commands that run async - manual calls are only needed for custom execution paths.
+     */
+    public void makeAsyncSafe() {
+        if (internal.asyncOwner == this) {
+            return;
+        }
+        internal = internal.duplicateForAsync();
+        internal.asyncOwner = this;
+        internal.argumentIterator = new ArgumentIterator(this);
+    }
+
     @Override
     public ArgumentIterator iterator() {
-        // NOTE: This relies strongly on the assumption of non-async execution for performance benefit.
+        // NOTE: This relies strongly on the assumption that any one set of internals is only executed by one thread at a time.
+        // Entries that run off-thread get isolated internals via makeAsyncSafe() to uphold that.
         internal.argumentIterator.index = internal.actualCommand != null ? internal.actualCommand.linearHandledCount : 0;
         internal.argumentIterator.entry = this;
         return internal.argumentIterator;
@@ -809,6 +898,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         }
         if (queue.holdingOn == this) {
             queue.holdingOn = null;
+            // Volatile write above, so anything the async worker did before finishing is visible to the queue's thread once it sees the null.
+            queue.wake();
         }
     }
 

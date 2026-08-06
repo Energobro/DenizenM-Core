@@ -4,6 +4,7 @@ import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsRuntimeException;
 import com.denizenscript.denizencore.objects.Argument;
 import com.denizenscript.denizencore.tags.TagContext;
+import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.DenizenCore;
@@ -15,7 +16,26 @@ import java.util.function.Consumer;
 
 public class CommandExecutor {
 
+    /** The queue currently executing a command on the main thread. Use {@link #getCurrentQueue()} to read this in code that might run off-thread. */
     public static ScriptQueue currentQueue;
+
+    /** The queue currently executing a command on any given non-main thread. */
+    private static final ThreadLocal<ScriptQueue> asyncCurrentQueue = new ThreadLocal<>();
+
+    /** Gets the queue currently executing a command on the calling thread, or null if none. */
+    public static ScriptQueue getCurrentQueue() {
+        return DenizenCore.isMainThread() ? currentQueue : asyncCurrentQueue.get();
+    }
+
+    /** Sets the queue currently executing a command on the calling thread. */
+    public static void setCurrentQueue(ScriptQueue queue) {
+        if (DenizenCore.isMainThread()) {
+            currentQueue = queue;
+        }
+        else {
+            asyncCurrentQueue.set(queue);
+        }
+    }
 
     public static void debugSingleExecution(ScriptEntry scriptEntry) {
         if (scriptEntry.getOriginalArguments().size() == 1 && scriptEntry.getOriginalArguments().get(0).equals("\0CALLBACK")) {
@@ -68,21 +88,75 @@ public class CommandExecutor {
     // Though if you really want to, you can use tags here like <@link tag objecttag.is.to> or <@link tag elementtag.and> or <@link tag elementtag.or>.
     // -->
 
+    /**
+     * Executes a script entry, picking the correct thread for it first.
+     * <p>
+     * There are three paths:
+     * - A '~' waited command that runs async (eg "~define") is handed to a worker thread, and the queue holds until it's done.
+     * - A command that isn't async-safe, reached from an async queue, is handed back to the main thread, and the worker waits for it.
+     * - Everything else runs right here on the calling thread.
+     */
     public static boolean execute(ScriptEntry scriptEntry) {
+        AbstractCommand command = scriptEntry.internal.actualCommand;
+        boolean onMainThread = DenizenCore.isMainThread();
+        if (scriptEntry.internal.waitfor && command.runAsyncWhenWaited && scriptEntry.getResidingQueue().holdingOn == scriptEntry) {
+            if (onMainThread && CoreConfiguration.allowAsyncScripts) {
+                scriptEntry.makeAsyncSafe();
+                DenizenCore.runAsync(() -> {
+                    try {
+                        executeInternal(scriptEntry);
+                    }
+                    finally {
+                        // Hand the "I'm done" back to the queue's own thread, so the queue never resumes in the middle of this.
+                        // Read the queue now rather than at dispatch time, as holding can move an entry to a replacement queue.
+                        scriptEntry.getResidingQueue().runOnQueueThread(() -> scriptEntry.setFinished(true));
+                    }
+                });
+                return true;
+            }
+            // Either already off-thread (an async queue running its own '~' command), or async is disabled by config.
+            // Either way, run it right here - the queue still has to be released, since these commands never call setFinished themselves.
+            try {
+                return executeInternal(scriptEntry);
+            }
+            finally {
+                scriptEntry.setFinished(true);
+            }
+        }
+        if (!onMainThread && !command.asyncSafe) {
+            // This command can't safely run off-thread, so the async queue waits while the main thread runs it.
+            boolean[] result = new boolean[1];
+            try {
+                DenizenCore.runOnMainThreadAndWait(() -> result[0] = executeInternal(scriptEntry));
+            }
+            catch (Throwable ex) {
+                Debug.echoError(scriptEntry, "Failed to hand command '" + command.getName() + "' to the main thread:");
+                Debug.echoError(scriptEntry, ex);
+                scriptEntry.setFinished(true);
+                return false;
+            }
+            return result[0];
+        }
+        return executeInternal(scriptEntry);
+    }
+
+    /** Executes a script entry on the current thread. Prefer {@link #execute(ScriptEntry)}, which handles thread selection. */
+    public static boolean executeInternal(ScriptEntry scriptEntry) {
         if (scriptEntry.dbCallShouldDebug()) {
             debugSingleExecution(scriptEntry);
         }
         TagManager.recentTagError = false;
         AbstractCommand command = scriptEntry.internal.actualCommand;
-        currentQueue = scriptEntry.getResidingQueue();
-        if (currentQueue.procedural && !command.isProcedural) {
+        ScriptQueue queue = scriptEntry.getResidingQueue();
+        setCurrentQueue(queue);
+        if (queue.procedural && !command.isProcedural) {
             Debug.echoError("Command " + command.name + " is not accepted within a procedure. Procedures may not produce a change in the world, they may only process logic.");
             return false;
         }
-        TagContext lastContext = Debug.currentContext;
+        TagContext lastContext = Debug.getCurrentContext();
         try {
             TagContext context = scriptEntry.getContext();
-            Debug.currentContext = context;
+            Debug.setCurrentContext(context);
             for (Argument arg : scriptEntry.internal.preprocArgs) {
                 if (DenizenCore.implementation.handleCustomArgs(scriptEntry, arg)) {
                     // Do nothing
@@ -95,7 +169,7 @@ public class CommandExecutor {
                     }
                     if (!shouldRun) {
                         scriptEntry.setFinished(true);
-                        currentQueue = null;
+                        setCurrentQueue(null);
                         return true;
                     }
                 }
@@ -113,7 +187,7 @@ public class CommandExecutor {
                 command.parseArgs(scriptEntry);
                 command.execute(scriptEntry);
             }
-            currentQueue = null;
+            setCurrentQueue(null);
             return true;
         }
         catch (InvalidArgumentsException | InvalidArgumentsRuntimeException e) {
@@ -128,7 +202,7 @@ public class CommandExecutor {
             Debug.log("(Attempted: " + scriptEntry + ")");
             Debug.echoDebug(scriptEntry, Debug.DebugElement.Footer);
             scriptEntry.setFinished(true);
-            currentQueue = null;
+            setCurrentQueue(null);
             return false;
         }
         catch (Throwable e) {
@@ -137,11 +211,11 @@ public class CommandExecutor {
             Debug.log("(Attempted: " + scriptEntry + ")");
             Debug.echoDebug(scriptEntry, Debug.DebugElement.Footer);
             scriptEntry.setFinished(true);
-            currentQueue = null;
+            setCurrentQueue(null);
             return false;
         }
         finally {
-            Debug.currentContext = lastContext;
+            Debug.setCurrentContext(lastContext);
         }
     }
 }

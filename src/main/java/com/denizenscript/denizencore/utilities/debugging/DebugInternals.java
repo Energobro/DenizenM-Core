@@ -67,7 +67,7 @@ public class DebugInternals {
             return;
         }
         errorDuplicatePrevention = true;
-        ScriptQueue sourceQueue = CommandExecutor.currentQueue;
+        ScriptQueue sourceQueue = CommandExecutor.getCurrentQueue();
         if (source == null && sourceQueue != null) {
             source = sourceQueue.getLastEntryExecuted();
         }
@@ -216,7 +216,7 @@ public class DebugInternals {
                 while (thrown.getCause() != null) {
                     thrown = thrown.getCause();
                 }
-                ScriptQueue sourceQueue = CommandExecutor.currentQueue;
+                ScriptQueue sourceQueue = CommandExecutor.getCurrentQueue();
                 if (source == null && sourceQueue != null) {
                     source = sourceQueue.getLastEntryExecuted();
                 }
@@ -255,7 +255,7 @@ public class DebugInternals {
     /** Gets an extra path to send debug to, if relevant. */
     public static Consumer<String> getDebugSender(Debuggable caller) {
         if (caller == null) {
-            caller = CommandExecutor.currentQueue;
+            caller = CommandExecutor.getCurrentQueue();
         }
         if (caller instanceof TagContext context && context.entry != null) {
             caller = context.entry;

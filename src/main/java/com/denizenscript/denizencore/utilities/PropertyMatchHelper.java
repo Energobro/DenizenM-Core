@@ -10,12 +10,15 @@ import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.function.BiPredicate;
 import java.util.stream.Collectors;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class PropertyMatchHelper<T extends ObjectTag> {
 
-    public static LinkedHashMap<String, PropertyMatchHelper<?>> matchHelperCache = new LinkedHashMap<>();
+    /** Cache of property matchers. Concurrent, as matching can happen from async queues (note: over-cap eviction drops an arbitrary entry rather than the oldest). */
+    public static Map<String, PropertyMatchHelper<?>> matchHelperCache = new ConcurrentHashMap<>();
 
     public static int MAX_MATCH_HELPER_CACHE = 1024;
 

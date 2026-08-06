@@ -12,6 +12,7 @@ public class ElseCommand extends AbstractCommand {
         setSyntax("else (if <comparison logic>)");
         setRequiredArguments(0, -1);
         isProcedural = true;
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]

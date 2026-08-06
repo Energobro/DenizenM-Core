@@ -13,56 +13,67 @@ import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.ArrayList;
 import java.util.Collection;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
 
     public static class SaveOptimizedFlag {
 
-        public MapTag map;
+        public volatile MapTag map;
 
-        public String string;
+        public volatile String string;
 
         public boolean canExpire;
 
         public MapTag getMap() {
-            if (map == null) {
+            // Note: builds into a local first, so that another thread can never see a half-filled map through the volatile field.
+            MapTag result = map;
+            if (result == null) {
                 if (string.startsWith("map@")) {
-                    map = MapTag.valueOf(string, CoreUtilities.noDebugContext);
+                    result = MapTag.valueOf(string, CoreUtilities.noDebugContext);
                 }
                 else {
-                    map = new MapTag();
-                    map.putObject(valueString, ObjectFetcher.pickObjectFor(string, CoreUtilities.noDebugContext));
+                    result = new MapTag();
+                    result.putObject(valueString, ObjectFetcher.pickObjectFor(string, CoreUtilities.noDebugContext));
                 }
+                map = result;
             }
-            return map;
+            return result;
         }
 
         public String getString() {
-            if (string == null) {
-                if (map.containsKey(expirationString) || map.getObject(valueString) instanceof MapTag) {
-                    string = map.savable();
+            String result = string;
+            if (result == null) {
+                MapTag mapCopy = map;
+                if (mapCopy.containsKey(expirationString) || mapCopy.getObject(valueString) instanceof MapTag) {
+                    result = mapCopy.savable();
                 }
                 else {
-                    string = map.getObject(valueString).savable();
+                    result = mapCopy.getObject(valueString).savable();
                 }
+                string = result;
             }
-            return string;
+            return result;
         }
     }
 
-    public HashMap<StringHolder, SaveOptimizedFlag> map;
+    /**
+     * The raw flag data.
+     * Concurrent, because flags (especially the server flag map) are commonly read by async queues and '~' async commands while the main thread writes them.
+     * Note that this only protects the map structure itself - a flag being rewritten while an async script reads it may still return the old value.
+     */
+    public Map<StringHolder, SaveOptimizedFlag> map;
 
-    public boolean modified;
+    public volatile boolean modified;
 
     public SavableMapFlagTracker() {
-        map = new HashMap<>();
+        map = new ConcurrentHashMap<>();
     }
 
     public SavableMapFlagTracker(String input) {
         input = input.replace("\r", "");
-        map = new HashMap<>(input.length() / 50);
+        map = new ConcurrentHashMap<>(Math.max(16, input.length() / 50));
         int eol = input.indexOf('\n');
         int startOfLine = 0;
         while (eol != -1) {

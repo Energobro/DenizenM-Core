@@ -303,7 +303,8 @@ public interface ObjectTag {
      */
     @Deprecated(forRemoval = true)
     default boolean tryAdvancedMatcher(String matcher) {
-        return tryAdvancedMatcher(matcher, Debug.currentContext != null ? Debug.currentContext : CoreUtilities.noDebugContext);
+        TagContext context = Debug.getCurrentContext();
+        return tryAdvancedMatcher(matcher, context != null ? context : CoreUtilities.noDebugContext);
     }
 
     /**

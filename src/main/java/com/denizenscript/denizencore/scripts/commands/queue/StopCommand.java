@@ -11,6 +11,7 @@ public class StopCommand extends AbstractCommand {
         setRequiredArguments(0, 0);
         isProcedural = true;
         autoCompile();
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]

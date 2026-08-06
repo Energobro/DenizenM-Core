@@ -23,6 +23,7 @@ public class RepeatCommand extends BracedCommand {
         isProcedural = true;
         generateDebug = false;
         autoCompile();
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]

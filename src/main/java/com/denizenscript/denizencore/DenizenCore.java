@@ -15,6 +15,7 @@ import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.tags.Attribute;
 import com.denizenscript.denizencore.tags.ReplaceableTagEvent;
 import com.denizenscript.denizencore.tags.TagManager;
+import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.PropertyMatchHelper;
 import com.denizenscript.denizencore.utilities.ReflectionHelper;
@@ -23,11 +24,16 @@ import com.denizenscript.denizencore.utilities.scheduling.AsyncSchedulable;
 import com.denizenscript.denizencore.utilities.scheduling.OneTimeSchedulable;
 import com.denizenscript.denizencore.utilities.scheduling.Schedulable;
 
+import com.denizenscript.denizencore.scripts.queues.core.AsyncQueue;
+
 import java.io.File;
 import java.io.FileNotFoundException;
 import java.io.InputStream;
 import java.util.ArrayList;
 import java.util.Properties;
+import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 /**
  * The entry point of the core Denizen engine.
@@ -77,19 +83,22 @@ public class DenizenCore {
     /**
      * Current system time (System.currentTimeMillis), updated per-tick.
      * Used to avoid multiple checks in the same tick having different time values.
+     * Volatile, as async queues read this from other threads.
      */
-    public static long currentTimeMillis = System.currentTimeMillis();
+    public static volatile long currentTimeMillis = System.currentTimeMillis();
 
     /**
      * Current monotonic time (System.nanoTime), updated per-tick.
      * Used to avoid multiple checks in the same tick having different time values.
+     * Volatile, as async queues read this from other threads.
      */
-    public static long currentTimeMonotonicMillis = CoreUtilities.monotonicMillis();
+    public static volatile long currentTimeMonotonicMillis = CoreUtilities.monotonicMillis();
 
     /**
      * Duration of time, in milliseconds, since the server started.
+     * Volatile, as async queues read this from other threads (eg for 'wait' delay tracking).
      */
-    public static long serverTimeMillis = 1;
+    public static volatile long serverTimeMillis = 1;
 
     /**
      * All current scheduled tasks.
@@ -100,6 +109,17 @@ public class DenizenCore {
      * All current delayed queues.
      */
     public static final ArrayList<TimedQueue> timedQueues = new ArrayList<>();
+
+    /**
+     * Tasks submitted from other threads that must run on the main thread, processed at the start of every tick.
+     * Prefer {@link #runOnMainThread(Runnable)} over touching this directly.
+     */
+    public static final ConcurrentLinkedQueue<Runnable> mainThreadTasks = new ConcurrentLinkedQueue<>();
+
+    /**
+     * Timed queues that were started from a different thread, and so need to be added to {@link #timedQueues} by the main thread.
+     */
+    public static final ConcurrentLinkedQueue<TimedQueue> pendingTimedQueues = new ConcurrentLinkedQueue<>();
 
     /**
      * Implementation helper class, must be implemented for Denizen to function.
@@ -167,6 +187,8 @@ public class DenizenCore {
      */
     public static void shutdown() {
         ShutdownScriptEvent.instance.fire();
+        AsyncQueue.stopAll();
+        runMainThreadTasks();
         saveAll(true);
         logInterceptor.standardOutput();
         commandRegistry.disableCoreMembers();
@@ -253,19 +275,88 @@ public class DenizenCore {
         return curThread.equals(MAIN_THREAD) || curThread.equals(TagManager.tagThread);
     }
 
-    /** Runs the task immediately if called on main thread, or later if called off-thread. */
+    /** Returns true if called from the literal main thread (unlike {@link #isMainThread()}, this ignores the tag-timeout helper thread). */
+    public static boolean isStrictlyMainThread() {
+        return Thread.currentThread().equals(MAIN_THREAD);
+    }
+
+    /** Runs the task immediately if called on main thread, or at the start of the next tick if called off-thread. */
     public static void runOnMainThread(Runnable run) {
         if (isMainThread()) {
             run.run();
         }
         else {
-            schedule(new OneTimeSchedulable(run, 0));
+            mainThreadTasks.add(run);
+        }
+    }
+
+    /**
+     * Runs the task on the main thread and blocks the calling thread until it has completed.
+     * Runs immediately (without blocking) if already on the main thread.
+     * Any exception thrown by the task is rethrown on the calling thread.
+     * Never call this from the main thread's own scheduled tasks, and never call it while holding a lock the main thread might need.
+     */
+    public static void runOnMainThreadAndWait(Runnable run) {
+        if (isMainThread()) {
+            run.run();
+            return;
+        }
+        CountDownLatch latch = new CountDownLatch(1);
+        Throwable[] error = new Throwable[1];
+        mainThreadTasks.add(() -> {
+            try {
+                run.run();
+            }
+            catch (Throwable ex) {
+                error[0] = ex;
+            }
+            finally {
+                latch.countDown();
+            }
+        });
+        try {
+            if (!latch.await(CoreConfiguration.mainThreadWaitTimeoutMillis, TimeUnit.MILLISECONDS)) {
+                throw new RuntimeException("Timed out after " + CoreConfiguration.mainThreadWaitTimeoutMillis + "ms waiting for the main thread to process an async request - is the server frozen, or was Denizen shut down?");
+            }
+        }
+        catch (InterruptedException ex) {
+            Thread.currentThread().interrupt();
+            throw new RuntimeException("Interrupted while waiting for the main thread.", ex);
+        }
+        if (error[0] != null) {
+            if (error[0] instanceof RuntimeException runtimeEx) {
+                throw runtimeEx;
+            }
+            if (error[0] instanceof Error errorObj) {
+                throw errorObj;
+            }
+            throw new RuntimeException(error[0]);
         }
     }
 
     /** Runs the task on a separate thread. */
     public static void runAsync(Runnable run) {
         AsyncSchedulable.executor.execute(run);
+    }
+
+    /** Processes all tasks that other threads have requested to be run on the main thread. Called automatically per-tick. */
+    public static void runMainThreadTasks() {
+        Runnable task;
+        while ((task = mainThreadTasks.poll()) != null) {
+            try {
+                task.run();
+            }
+            catch (Throwable ex) {
+                Debug.echoError("DenizenCore - Main thread task (from an async source) failed");
+                Debug.echoError(ex);
+            }
+        }
+        TimedQueue queue;
+        while ((queue = pendingTimedQueues.poll()) != null) {
+            if (!queue.isStopped) {
+                timedQueues.add(queue);
+            }
+        }
     }
 
     /**
@@ -291,6 +382,7 @@ public class DenizenCore {
         serverTimeMillis += ms_elapsed;
         currentTimeMillis = System.currentTimeMillis();
         currentTimeMonotonicMillis = CoreUtilities.monotonicMillis();
+        runMainThreadTasks();
         TickScriptEvent.instance.ticks++;
         if (TickScriptEvent.instance.eventData.isEnabled) {
             TickScriptEvent.instance.fire();

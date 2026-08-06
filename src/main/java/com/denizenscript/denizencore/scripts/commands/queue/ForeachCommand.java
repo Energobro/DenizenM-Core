@@ -26,6 +26,7 @@ public class ForeachCommand extends BracedCommand {
         isProcedural = true;
         setPrefixesHandled("as", "key");
         setBooleansHandled("stop", "next", "\0callback");
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]

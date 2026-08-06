@@ -29,6 +29,7 @@ import java.util.*;
 import java.util.function.BiFunction;
 import java.util.function.Consumer;
 import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * Core handler for script events (in world script containers).
@@ -1032,7 +1033,8 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
         }
     }
 
-    public static final HashMap<String, MatchHelper> knownMatchers = new HashMap<>();
+    /** Cache of parsed matchers. Concurrent, as matching can happen from async queues. */
+    public static final Map<String, MatchHelper> knownMatchers = new ConcurrentHashMap<>();
 
     public static boolean isAdvancedMatchable(String input) {
         return input.startsWith("regex:") || CoreUtilities.contains(input, '|') || CoreUtilities.contains(input, '*') || input.startsWith("!");
@@ -1080,8 +1082,8 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
         else {
             result = new ExactMatchHelper(input);
         }
+        result.raw = input; // Must be set before publishing to the cache, so other threads never see a half-built matcher.
         knownMatchers.put(input, result);
-        result.raw = input;
         return result;
     }
 

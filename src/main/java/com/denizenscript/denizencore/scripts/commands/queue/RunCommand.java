@@ -22,7 +22,7 @@ public class RunCommand extends AbstractCommand implements Holdable {
 
     public RunCommand() {
         setName("run");
-        setSyntax("run [<script>] (path:<name>) (def:<element>|.../defmap:<map>/def.<name>:<value>) (id:<name>) (speed:<value>/instantly) (delay:<value>)");
+        setSyntax("run [<script>] (path:<name>) (def:<element>|.../defmap:<map>/def.<name>:<value>) (id:<name>) (speed:<value>/instantly) (delay:<value>) (async)");
         setRequiredArguments(1, -1);
         isProcedural = true;
         allowedDynamicPrefixes = true;
@@ -30,7 +30,7 @@ public class RunCommand extends AbstractCommand implements Holdable {
 
     // <--[command]
     // @Name Run
-    // @Syntax run [<script>] (path:<name>) (def:<element>|.../defmap:<map>/def.<name>:<value>) (id:<name>) (speed:<value>/instantly) (delay:<value>)
+    // @Syntax run [<script>] (path:<name>) (def:<element>|.../defmap:<map>/def.<name>:<value>) (id:<name>) (speed:<value>/instantly) (delay:<value>) (async)
     // @Required 1
     // @Maximum -1
     // @Short Runs a script in a new queue.
@@ -62,7 +62,13 @@ public class RunCommand extends AbstractCommand implements Holdable {
     // Optionally, specify the "id:" argument to choose a custom queue ID to be used.
     // If none is specified, a randomly generated one will be used. Generally, don't use this argument.
     //
+    // Optionally, specify 'async' to run the script on a separate thread instead of the server's main thread.
+    // The new queue's own logic (tags, math, text processing, ...) then costs no main thread time at all,
+    // and any command in it that isn't safe to run off-thread is automatically handed back to the main thread.
+    // Refer to <@link language Async Queues> before using this - it is not a free speed boost, and is only correct for scripts that mostly process data.
+    //
     // The run command is ~waitable. Refer to <@link language ~waitable>.
+    // Note that '~run ... async' is valid and useful: the current queue waits for the result, while the server keeps running.
     //
     // @Tags
     // <entry[saveName].created_queue> returns the queue that was started by the run command.
@@ -74,6 +80,11 @@ public class RunCommand extends AbstractCommand implements Holdable {
     // @Usage
     // Use to run a task script named 'MyTask' that isn't normally instant, instantly.
     // - run MyTask instantly
+    //
+    // @Usage
+    // Use to run a heavy data-processing task off the main thread, and wait for its result.
+    // - ~run MyHeavyTask async save:heavy
+    // - narrate "Done: <entry[heavy].created_queue.definition[result]>"
     //
     // @Usage
     // Use to run a local subscript named 'alt_path'.
@@ -116,6 +127,9 @@ public class RunCommand extends AbstractCommand implements Holdable {
             }
             else if (arg.matches("instant", "instantly")) {
                 scriptEntry.addObject("instant", new ElementTag(true));
+            }
+            else if (arg.matches("async")) {
+                scriptEntry.addObject("async", new ElementTag(true));
             }
             else if (arg.matchesPrefix("delay")
                     && arg.matchesArgumentType(DurationTag.class)) {
@@ -180,6 +194,7 @@ public class RunCommand extends AbstractCommand implements Holdable {
         ElementTag pathElement = scriptEntry.getElement("path");
         ScriptTag script = scriptEntry.getObjectTag("script");
         ElementTag instant = scriptEntry.getElement("instant");
+        ElementTag async = scriptEntry.getElement("async");
         ElementTag id = scriptEntry.getElement("id");
         DurationTag speed = scriptEntry.getObjectTag("speed");
         DurationTag delay = scriptEntry.getObjectTag("delay");
@@ -198,7 +213,7 @@ public class RunCommand extends AbstractCommand implements Holdable {
         }
         ListTag definitions = scriptEntry.getObjectTag("definitions");
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, getName(), script, pathElement, instant, speed, delay, id, defMap, definitions);
+            Debug.report(scriptEntry, getName(), script, pathElement, instant, async, speed, delay, id, defMap, definitions);
         }
         Consumer<ScriptQueue> configure = (queue) -> {
             // Set any delay
@@ -220,7 +235,8 @@ public class RunCommand extends AbstractCommand implements Holdable {
             queue.procedural = scriptEntry.getResidingQueue().procedural;
         };
         String idString = id != null ? "FORCE:" + id.asString() : null;
-        ScriptQueue result = ScriptUtilities.createAndStartQueue(script.getContainer(), path, scriptEntry.entryData, null, configure, speed, idString, definitions, scriptEntry);
+        boolean isAsync = async != null && async.asBoolean();
+        ScriptQueue result = ScriptUtilities.createAndStartQueue(script.getContainer(), path, scriptEntry.entryData, null, configure, speed, idString, definitions, scriptEntry, isAsync);
         if (result == null) {
             Debug.echoError(scriptEntry, "Script run failed (are you sure it's a task script, and the path exists?)!");
             return;

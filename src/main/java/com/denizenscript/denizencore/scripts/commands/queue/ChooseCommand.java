@@ -21,6 +21,7 @@ public class ChooseCommand extends BracedCommand {
         setRequiredArguments(1, 1);
         isProcedural = true;
         autoCompile();
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]

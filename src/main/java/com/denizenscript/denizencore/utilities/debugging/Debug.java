@@ -14,10 +14,28 @@ public class Debug {
     /** Current debug recording text, if recording enabled, for submission to paste server. */
     public static StringBuilder debugRecording = new StringBuilder();
 
-    /** Current main thread context, maintained automatically by stacked calls, for error handling. */
+    /** Current main thread context, maintained automatically by stacked calls, for error handling. Use {@link #getCurrentContext()} from code that might run off-thread. */
     public static TagContext currentContext = null;
 
-    /** Stack trace helper for current error context. */
+    /** Current context of any given non-main thread (async queues and '~' async commands), for error handling. */
+    private static final ThreadLocal<TagContext> asyncCurrentContext = new ThreadLocal<>();
+
+    /** Gets the current context of the calling thread, for error handling. */
+    public static TagContext getCurrentContext() {
+        return DenizenCore.isMainThread() ? currentContext : asyncCurrentContext.get();
+    }
+
+    /** Sets the current context of the calling thread, for error handling. */
+    public static void setCurrentContext(TagContext context) {
+        if (DenizenCore.isMainThread()) {
+            currentContext = context;
+        }
+        else {
+            asyncCurrentContext.set(context);
+        }
+    }
+
+    /** Stack trace helper for current error context. Main thread only - async threads skip error context tracking. */
     public static Stack<Object> errorContextStack = new Stack<>();
 
     /** Push an error context object to the stack. */
@@ -92,7 +110,7 @@ public class Debug {
 
     /** Echos an error message, using automatically gathered context. */
     public static void echoError(String error) {
-        echoError(currentContext, error);
+        echoError(getCurrentContext(), error);
     }
 
     /** Echos an error message, using manually specified context. */
@@ -103,7 +121,7 @@ public class Debug {
     /** Echos an error message, using manually specified context and optional extra text context. */
     public static void echoError(TagContext context, String addedContext, String error) {
         if (context == null) {
-            context = currentContext;
+            context = getCurrentContext();
         }
         if (context != null && context.entry != null) {
             echoError(context.entry, addedContext, error);
@@ -144,7 +162,8 @@ public class Debug {
 
     /** Echos an exception error message, with automatic context filling. */
     public static void echoError(Throwable ex) {
-        DenizenCore.runOnMainThread(() -> DebugInternals.echoExceptionInternal(currentContext == null ? null : currentContext.entry, ex));
+        TagContext context = getCurrentContext();
+        DenizenCore.runOnMainThread(() -> DebugInternals.echoExceptionInternal(context == null ? null : context.entry, ex));
     }
     /** Echos an exception error message, with a specific script entry as the context source. */
     public static void echoError(ScriptEntry entry, Throwable error) {

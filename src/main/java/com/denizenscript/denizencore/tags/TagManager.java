@@ -17,8 +17,10 @@ import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 import java.util.regex.Pattern;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class TagManager {
 
@@ -225,10 +227,12 @@ public class TagManager {
         if (CoreConfiguration.debugVerbose) {
             Debug.log("Tag read: " + event.raw_tag + ", " + tT + "...");
         }
-        TagContext last = Debug.currentContext;
-        Debug.currentContext = context;
+        TagContext last = Debug.getCurrentContext();
+        Debug.setCurrentContext(context);
         try {
-            if (tT <= 0 || isInTag || (!Debug.shouldDebug(context) && !CoreConfiguration.tagTimeoutWhenSilent)) {
+            // Note: the timeout mechanism hands the tag to a helper thread and marks that thread as "the" tag thread, which is only meaningful for the main thread.
+            // Tags read from an async queue simply run in place - they can't freeze the server anyway.
+            if (tT <= 0 || isInTag || !DenizenCore.isStrictlyMainThread() || (!Debug.shouldDebug(context) && !CoreConfiguration.tagTimeoutWhenSilent)) {
                 fireEvent(event);
             }
             else {
@@ -240,7 +244,7 @@ public class TagManager {
             return event.getReplacedObj();
         }
         finally {
-            Debug.currentContext = last;
+            Debug.setCurrentContext(last);
         }
     }
 
@@ -282,7 +286,8 @@ public class TagManager {
 
     public static Pattern OBJECTTAG_CONFUSION_PATTERN = Pattern.compile("<\\w+tag[\\[.>].*", Pattern.CASE_INSENSITIVE);
 
-    public static HashMap<String, ParseableTag> preCalced = new HashMap<>();
+    /** Cache of pre-parsed tagged text. Concurrent, as tags can be parsed from async queues. */
+    public static Map<String, ParseableTag> preCalced = new ConcurrentHashMap<>();
 
     public static ParseableTag DEFAULT_PARSEABLE_EMPTY = new ParseableTag("");
 

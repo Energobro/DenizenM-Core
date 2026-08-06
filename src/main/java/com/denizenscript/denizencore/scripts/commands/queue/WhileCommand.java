@@ -21,6 +21,7 @@ public class WhileCommand extends BracedCommand {
         setRequiredArguments(1, -1);
         setParseArgs(false);
         isProcedural = true;
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]

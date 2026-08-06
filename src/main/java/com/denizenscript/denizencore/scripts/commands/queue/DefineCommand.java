@@ -12,9 +12,10 @@ import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
+import com.denizenscript.denizencore.scripts.commands.Holdable;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 
-public class DefineCommand extends AbstractCommand {
+public class DefineCommand extends AbstractCommand implements Holdable {
 
     public DefineCommand() {
         setName("define");
@@ -22,6 +23,7 @@ public class DefineCommand extends AbstractCommand {
         setRequiredArguments(1, 2);
         isProcedural = true;
         allowedDynamicPrefixes = true;
+        setAsyncWaitable(true);
     }
 
     // <--[command]
@@ -46,6 +48,19 @@ public class DefineCommand extends AbstractCommand {
     //
     // Definitions can be sub-mapped with the '.' character, meaning a def named 'x.y.z' is actually a def 'x' as a MapTag with key 'y' as a MapTag with key 'z' as the final defined value.
     // In other words, "<[a.b.c]>" is equivalent to "<[a].get[b].get[c]>"
+    //
+    // The define command is ~waitable, and unusually so: when waited for, the entire command - including parsing the tags in its value - runs on a separate thread.
+    // Refer to <@link language ~waitable>.
+    // This is useful when the value is expensive to calculate (long lists, heavy text or math processing, large flag data, ...):
+    // the queue waits for the result as usual, but the server's main thread stays free the whole time instead of freezing until the tags finish.
+    //
+    // <code>
+    // - ~define result <server.flag[big_data].parse_tag[<[parse_value].to_uppercase>].filter_tag[<[filter_value].contains[x]>]>
+    // </code>
+    //
+    // Only use this for tags that are safe to read off-thread. Tags that read live world state may return slightly outdated results,
+    // and any tag provided by an implementation that requires the main thread should not be used here.
+    // For simple values, plain "define" is faster - the "~" version costs a thread hand-off, which is only worth it for genuinely slow work.
     //
     // @Tags
     // <[<id>]> to get the value assigned to an ID
@@ -75,6 +90,11 @@ public class DefineCommand extends AbstractCommand {
     //     - narrate Hello!
     // - else if <[arg1]> == goodbye:
     //     - narrate Goodbye!
+    //
+    // @Usage
+    // Use to calculate a slow value without freezing the server while it calculates.
+    // - ~define sorted_data <server.flag[player_scores].sort_by_value.reverse>
+    // - narrate "Top scorer: <[sorted_data].keys.first>"
     //
     // @Usage
     // Use to remove a definition.

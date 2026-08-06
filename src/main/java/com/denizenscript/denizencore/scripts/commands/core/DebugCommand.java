@@ -25,6 +25,7 @@ public class DebugCommand extends AbstractCommand implements Holdable {
         isProcedural = true;
         generateDebug = false;
         autoCompile();
+        asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
     // <--[command]
