@@ -15,7 +15,9 @@ import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
@@ -63,6 +65,18 @@ public class TagManager {
          * Indicates that static input to this tag base yields static output (for tag optimization usage).
          */
         public boolean isStatic;
+
+        /**
+         * If true, tags on this base must be read on the main thread - an async script reading one will hand it to the main thread and wait.
+         * Set this for any tag base that reads live server/world state. See {@link TagManager#markMainThreadOnly}.
+         */
+        public boolean mainThreadOnly;
+
+        /**
+         * Sub-tags of a main-thread-only base that are safe to read off-thread anyway (eg flag data), by first attribute name.
+         * Null means "none".
+         */
+        public HashSet<String> asyncSafeSubTags;
 
         public TagBaseData() {
         }
@@ -126,11 +140,92 @@ public class TagManager {
         }
     }
 
+    // <--[language]
+    // @name Async Tag Safety
+    // @group Tag System
+    // @description
+    // Scripts that run off the main thread (see <@link language Async Queues>, and '~' waited commands like <@link command define>) read their tags on that same separate thread.
+    //
+    // That's perfectly safe for tags that just process data - text, lists, maps, math, durations, flags, and so on.
+    // It is not safe for tags that read live server state, because the server is free to change that data at the very moment the tag reads it.
+    //
+    // To keep scripts correct without making script writers memorize which tags are which, implementations mark those tag bases as "main thread only".
+    // When an async script reads one, the tag is automatically handed to the main thread, evaluated there, and the result returned - the async script simply waits for it.
+    //
+    // The consequence is that such tags are safe, but slow: they cost main thread time as usual, plus up to a tick of waiting.
+    // So an async script that mostly reads live server state gains nothing; async is for scripts that mostly process data.
+    // -->
+
+    /**
+     * Marks a tag base as one that may only be read on the main thread - async scripts will automatically hand these tags to the main thread and wait for the result.
+     * Use this for any tag base that reads live server/world state.
+     * @param baseName the name of the tag base (must already be registered).
+     * @param asyncSafeSubTags names of sub-tags that are safe to read off-thread regardless (eg "flag"), or none.
+     */
+    public static void markMainThreadOnly(String baseName, String... asyncSafeSubTags) {
+        TagBaseData base = baseTags.get(baseName);
+        if (base == null) {
+            Debug.echoError("Cannot mark tag base '" + baseName + "' as main-thread-only: no such tag base is registered.");
+            return;
+        }
+        base.mainThreadOnly = true;
+        if (asyncSafeSubTags.length > 0) {
+            base.asyncSafeSubTags = new HashSet<>(Arrays.asList(asyncSafeSubTags));
+        }
+    }
+
+    /**
+     * Marks an object type as one whose tags may only be read on the main thread - async scripts will automatically hand these tags to the main thread and wait.
+     * <p>
+     * This is separate from {@link #markMainThreadOnly} on purpose: marking the tag base only covers tags written as "&lt;player.name&gt;",
+     * while marking the type also covers the same object arriving through a definition ("&lt;[my_entity].flag[x]&gt;"), a context tag, an entry tag, or a procedure result.
+     * Any Bukkit-style live object should be marked both ways.
+     * @param type the object type class (must already be registered with the ObjectFetcher).
+     * @param asyncSafeSubTags names of sub-tags that are safe to read off-thread regardless (eg "flag"), or none.
+     */
+    public static void markObjectTypeMainThreadOnly(Class<? extends ObjectTag> type, String... asyncSafeSubTags) {
+        ObjectType<? extends ObjectTag> objectType = ObjectFetcher.getType(type);
+        if (objectType == null || objectType.tagProcessor == null) {
+            Debug.echoError("Cannot mark object type '" + DebugInternals.getClassNameOpti(type) + "' as main-thread-only: it isn't registered (or has no tag processor).");
+            return;
+        }
+        objectType.tagProcessor.mainThreadOnly = true;
+        if (asyncSafeSubTags.length > 0) {
+            objectType.tagProcessor.asyncSafeSubTags = new HashSet<>(Arrays.asList(asyncSafeSubTags));
+        }
+    }
+
+    /** Returns true if this tag must be moved to the main thread before being read by the current (non-main) thread. */
+    public static boolean requiresMainThread(TagBaseData baseHandler, ReplaceableTagEvent event) {
+        if (!baseHandler.mainThreadOnly) {
+            return false;
+        }
+        if (baseHandler.asyncSafeSubTags != null) {
+            Attribute attribute = event.getAttributes();
+            if (attribute.attributes.length > 1 && baseHandler.asyncSafeSubTags.contains(attribute.attributes[1].key)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     public static void fireEvent(ReplaceableTagEvent event) {
         if (CoreConfiguration.debugVerbose) {
             Debug.log("Tag fire: " + event.raw_tag + ", " + event.getAttributes().attributes[0].rawKey.contains("@") + ", " + event.hasAlternative() + "...");
         }
         TagBaseData baseHandler = event.alternateBase != null ? event.alternateBase : event.mainRef.tagBase;
+        if (baseHandler != null && !DenizenCore.isMainThread() && requiresMainThread(baseHandler, event)) {
+            // This tag reads live server state, so it can't be read from an async script's thread - let the main thread do it while we wait.
+            Debug.verboseLog("Tag '" + event.raw_tag + "' must be read on the main thread, handing it over from thread '" + Thread.currentThread().getName() + "'.");
+            try {
+                DenizenCore.runOnMainThreadAndWait(() -> fireEvent(event));
+            }
+            catch (Throwable ex) {
+                Debug.echoError("Failed to read tag '" + event.raw_tag + "' on the main thread (requested by an async script):");
+                Debug.echoError(ex);
+            }
+            return;
+        }
         if (baseHandler != null) {
             Attribute attribute = event.getAttributes();
             try {

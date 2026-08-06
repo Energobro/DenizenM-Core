@@ -590,6 +590,30 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
         });
 
         // <--[tag]
+        // @attribute <util.current_thread>
+        // @returns ElementTag
+        // @description
+        // Returns the name of the thread that is reading this tag right now.
+        // Mainly useful for verifying whether a script is actually running off the main thread - refer to <@link language Async Queues> and <@link language ~waitable>.
+        // Note that this is read per-tag: inside "- ~define x <util.current_thread>" this returns a worker thread name,
+        // because that command parses its tags off-thread, even though the queue itself is a normal main thread queue.
+        // -->
+        tagProcessor.registerTag(ElementTag.class, "current_thread", (attribute, object) -> {
+            return new ElementTag(Thread.currentThread().getName(), true);
+        });
+
+        // <--[tag]
+        // @attribute <util.is_main_thread>
+        // @returns ElementTag(Boolean)
+        // @description
+        // Returns true if this tag is being read on the server's main thread, or false if it's being read by an async script.
+        // Refer to <@link language Async Queues>.
+        // -->
+        tagProcessor.registerTag(ElementTag.class, "is_main_thread", (attribute, object) -> {
+            return new ElementTag(DenizenCore.isMainThread());
+        });
+
+        // <--[tag]
         // @attribute <util.event_stats>
         // @returns ElementTag
         // @description

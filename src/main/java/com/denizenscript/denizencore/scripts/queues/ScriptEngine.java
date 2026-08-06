@@ -16,6 +16,10 @@ public class ScriptEngine {
             return false;
         }
         if (!(scriptQueue instanceof TimedQueue)) {
+            if (scriptQueue.replacementQueue != null) {
+                // Already converted (eg by an async '~' command converting it up-front) - converting again would strand a duplicate queue.
+                return true;
+            }
             scriptQueue.forceToTimed(null);
         }
         return true;

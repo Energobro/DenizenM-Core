@@ -1,5 +1,6 @@
 package com.denizenscript.denizencore.tags;
 
+import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.objects.Mechanism;
 import com.denizenscript.denizencore.objects.ObjectFetcher;
 import com.denizenscript.denizencore.objects.ObjectTag;
@@ -16,6 +17,18 @@ import java.util.HashMap;
 import java.util.List;
 
 public class ObjectTagProcessor<T extends ObjectTag> {
+
+    /**
+     * If true, tags on objects of this type read live server state, so an async script reading one will hand it to the main thread and wait.
+     * See <@link language Async Tag Safety> and {@link TagManager#markObjectTypeMainThreadOnly}.
+     * <p>
+     * This exists in addition to the tag-base level marking because an object can reach a tag without going through its own base,
+     * for example via a definition ('&lt;[my_entity].flag[x]&gt;'), a context tag, or a procedure result.
+     */
+    public boolean mainThreadOnly;
+
+    /** Sub-tags of a main-thread-only type that are safe to read off-thread anyway (eg flag data), by name. Null means "none". */
+    public java.util.HashSet<String> asyncSafeSubTags;
 
     public static class TagData<T extends ObjectTag, R extends ObjectTag> {
 
@@ -153,6 +166,21 @@ public class ObjectTagProcessor<T extends ObjectTag> {
             return object;
         }
         Attribute.AttributeComponent nextComponent = attribute.attributes[attribute.fulfilled];
+        if (mainThreadOnly && !DenizenCore.isMainThread() && (asyncSafeSubTags == null || !asyncSafeSubTags.contains(nextComponent.key))) {
+            // This object reads live server state, so an async script can't read it directly.
+            // The whole remaining tag runs on the main thread in one hand-off - the recursive call below sees the main thread and proceeds normally.
+            Debug.verboseLog("Tag '" + nextComponent.key + "' on a main-thread-only object, handing it over from thread '" + Thread.currentThread().getName() + "'.");
+            ObjectTag[] result = new ObjectTag[1];
+            try {
+                DenizenCore.runOnMainThreadAndWait(() -> result[0] = getObjectAttribute(object, attribute));
+            }
+            catch (Throwable ex) {
+                attribute.echoError("Failed to read tag '" + nextComponent.key + "' on the main thread (requested by an async script):");
+                attribute.echoError(ex);
+                return null;
+            }
+            return result[0];
+        }
         ObjectTag returned;
         TagData data = nextComponent.data;
         if (data == null) {

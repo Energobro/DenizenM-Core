@@ -349,13 +349,11 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (script_entries.isEmpty() && holdingOn == null) {
             return;
         }
-        if (!isOnOwnerThread()) {
-            // Queue was started from the wrong thread (eg a main-thread queue started by async code) - hand it to the thread that actually owns it.
-            if (CoreConfiguration.verifyThreadMatches) {
-                Debug.verboseLog("Queue '" + id + "' was started from thread '" + Thread.currentThread().getName() + "', moving the start to its owner thread.");
-            }
-            runOnQueueThread(() -> start(doBasicConfig));
-            return;
+        // Note: a queue started from a non-main thread deliberately runs on that thread rather than being deferred to the main thread.
+        // Callers rely on a started queue having actually run (the 'proc' tag reads its determination immediately after starting it),
+        // and safety is handled per-command and per-tag instead: anything that isn't async-safe is handed to the main thread as it's reached.
+        if (CoreConfiguration.verifyThreadMatches && !isOnOwnerThread()) {
+            Debug.verboseLog("Queue '" + id + "' is being started from thread '" + Thread.currentThread().getName() + "' and will run there.");
         }
         allQueues.put(id, this);
         is_started = true;
@@ -422,8 +420,9 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (is_stopping) {
             return;
         }
-        if (!isOnOwnerThread()) {
-            // Stop was requested by a different thread - let the owner thread handle it, so it can't stop mid-command.
+        if (isAsync() && !isOnOwnerThread()) {
+            // An async queue must only be stopped by its own worker thread, so it can't be torn down mid-command.
+            // Other queue types stop wherever they're told to - deferring that would break callers that expect a stopped queue immediately (eg procedure scripts).
             runOnQueueThread(this::stop);
             return;
         }

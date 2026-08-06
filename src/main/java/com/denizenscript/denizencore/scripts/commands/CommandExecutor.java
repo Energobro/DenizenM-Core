@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
+import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.tags.TagManager;
 
 import java.util.function.Consumer;
@@ -101,6 +102,13 @@ public class CommandExecutor {
         boolean onMainThread = DenizenCore.isMainThread();
         if (scriptEntry.internal.waitfor && command.runAsyncWhenWaited && scriptEntry.getResidingQueue().holdingOn == scriptEntry) {
             if (onMainThread && CoreConfiguration.allowAsyncScripts) {
+                ScriptQueue queue = scriptEntry.getResidingQueue();
+                if (!(queue instanceof TimedQueue)) {
+                    // Waiting for this command will force the queue to become a timed queue - do that now, before the worker thread starts.
+                    // If it happened later (from ScriptEngine.shouldHold), the main thread would be copying the queue's definitions
+                    // at the same moment the worker is writing to them.
+                    queue.forceToTimed(null);
+                }
                 scriptEntry.makeAsyncSafe();
                 DenizenCore.runAsync(() -> {
                     try {
@@ -125,6 +133,7 @@ public class CommandExecutor {
         }
         if (!onMainThread && !command.asyncSafe) {
             // This command can't safely run off-thread, so the async queue waits while the main thread runs it.
+            Debug.verboseLog("Command '" + command.getName() + "' isn't async-safe, handing it to the main thread from thread '" + Thread.currentThread().getName() + "'.");
             boolean[] result = new boolean[1];
             try {
                 DenizenCore.runOnMainThreadAndWait(() -> result[0] = executeInternal(scriptEntry));
