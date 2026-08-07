@@ -2,6 +2,7 @@ package com.denizenscript.denizencore.scripts.commands.queue;
 
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.objects.Argument;
+import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.objects.core.QueueTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
@@ -137,12 +138,18 @@ public class AsyncCommand extends BracedCommand {
             queue.injectEntriesAtStart(entries);
             return;
         }
+        MapTag blockDefinitions = null;
         if (!detached && !(queue instanceof TimedQueue)) {
             // Waiting for the block will force this queue to become a timed queue - do that now, before the worker thread starts.
             // If it happened later (from ScriptEngine.shouldHold), the main thread would be copying the queue's definitions
             // at the same moment the worker is writing to them.
+            ScriptQueue deadQueue = queue;
             queue.forceToTimed(null);
             queue = scriptEntry.getResidingQueue();
+            // That conversion already handed the outer queue a fresh deep copy and left the old queue dead (stopped, cleared, and skipped
+            // by 'QueueTag.ensure'), so its map has no readers left and the block can simply take it.
+            // Duplicating a second time here would cost the main thread exactly the kind of work the block exists to move off it.
+            blockDefinitions = deadQueue.definitions;
         }
         AsyncQueue subQueue = new AsyncQueue("ASYNC");
         subQueue.debugOutput = queue.debugOutput;
@@ -151,7 +158,7 @@ public class AsyncCommand extends BracedCommand {
         subQueue.determinationTarget = queue.determinationTarget;
         // The block works on its own copy of the definitions, which replaces the outer queue's set once the block is done.
         // Sharing one map instead would have the worker thread and the main thread writing to it at the same time.
-        subQueue.definitions = queue.definitions.duplicate();
+        subQueue.definitions = blockDefinitions != null ? blockDefinitions : queue.definitions.duplicate();
         AsyncData data = new AsyncData();
         scriptEntry.setData(data);
         ScriptEntry callbackEntry = new ScriptEntry("ASYNC", new String[]{"\0CALLBACK"}, scriptEntry.getScriptContainer());
