@@ -157,10 +157,9 @@ public class AsyncCommand extends BracedCommand {
             scriptEntry.setFinished(true);
             return;
         }
+        // Note: no debug report here - the generated executor already prints this command's name and arguments,
+        // and the queue is on the line above it. Reporting again just doubled the output.
         ScriptQueue queue = scriptEntry.getResidingQueue();
-        if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, "Async", db("detached", detached), new QueueTag(queue));
-        }
         List<ScriptEntry> entries = getBracedCommandsDirect(scriptEntry, scriptEntry);
         if (entries == null || entries.isEmpty()) {
             Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");

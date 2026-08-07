@@ -242,9 +242,28 @@ public abstract class AbstractCommand {
      */
     public boolean runAsyncWhenWaited = false;
 
+    /**
+     * Whether an async script may hand this command to the main thread and carry on without waiting for it.
+     * <p>
+     * Normally an async script that reaches a command it can't run itself stops until the main thread has run it, which costs up to a tick each time.
+     * A deferrable command skips that wait: its arguments are still parsed immediately, on the script's own thread, so the values are the ones
+     * the script had at that moment - only the execution is passed over. Deferred commands keep their order relative to each other.
+     * <p>
+     * Set this true only for a command that hands nothing back to its script - particles, sounds, messages.
+     * It must not be {@link Holdable}, must not save an entry the script reads later, and must not parse tags inside its own execute method,
+     * since those would then be read at the deferred moment rather than at the moment the script asked for them.
+     * Requires the command to have no generated executor, as those fuse argument parsing and execution into one step that cannot be split.
+     */
+    public boolean asyncDeferrable = false;
+
     /** Marks this command as safe to run off the main thread. See {@link #asyncSafe}. */
     public void setAsyncSafe(boolean safe) {
         asyncSafe = safe;
+    }
+
+    /** Marks this command as one an async script may fire off without waiting. See {@link #asyncDeferrable}. */
+    public void setAsyncDeferrable(boolean deferrable) {
+        asyncDeferrable = deferrable;
     }
 
     /** Marks this command as one that runs off-thread when '~' waited for. See {@link #runAsyncWhenWaited}. */

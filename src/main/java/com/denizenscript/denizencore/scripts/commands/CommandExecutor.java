@@ -131,6 +131,9 @@ public class CommandExecutor {
                 scriptEntry.setFinished(true);
             }
         }
+        if (!onMainThread && !command.asyncSafe && canDefer(scriptEntry, command)) {
+            return executeDeferred(scriptEntry);
+        }
         if (!onMainThread && !command.asyncSafe) {
             // This command can't safely run off-thread, so the async queue waits while the main thread runs it.
             Debug.verboseLog("Command '" + command.getName() + "' isn't async-safe, handing it to the main thread from thread '" + Thread.currentThread().getName() + "'.");
@@ -152,6 +155,72 @@ public class CommandExecutor {
             return result[0];
         }
         return executeInternal(scriptEntry);
+    }
+
+    /**
+     * Returns true if this entry may be handed to the main thread without the async script waiting for it.
+     * See {@link AbstractCommand#asyncDeferrable} for what a command must be for this to be allowed at all;
+     * the checks here are the per-entry ones, which the command itself cannot know about.
+     */
+    public static boolean canDefer(ScriptEntry scriptEntry, AbstractCommand command) {
+        if (!command.asyncDeferrable || command.generatedExecutor != null) {
+            return false;
+        }
+        if (scriptEntry.internal.waitfor) {
+            // The script is explicitly waiting for this one, which is the opposite of firing it off.
+            return false;
+        }
+        // 'if:' decides whether the command runs at all and 'save:' is read by a later line - both must be resolved now, not later,
+        // and both are handled inside the execution step. Rare on the commands this applies to, so simply don't defer when either is present.
+        return scriptEntry.internal.preprocArgs == null || scriptEntry.internal.preprocArgs.isEmpty();
+    }
+
+    /**
+     * Runs a command whose result its script never reads, without making the script wait for the main thread.
+     * <p>
+     * Arguments are parsed here, on the script's own thread, so the command is handed over with the values the script had at this moment.
+     * Only the execution itself goes to the main thread, and it keeps its place in line behind anything deferred before it.
+     */
+    public static boolean executeDeferred(ScriptEntry scriptEntry) {
+        AbstractCommand command = scriptEntry.internal.actualCommand;
+        if (scriptEntry.dbCallShouldDebug()) {
+            debugSingleExecution(scriptEntry);
+        }
+        ScriptQueue queue = scriptEntry.getResidingQueue();
+        TagContext lastContext = Debug.getCurrentContext();
+        try {
+            setCurrentQueue(queue);
+            Debug.setCurrentContext(scriptEntry.getContext());
+            command.parseArgs(scriptEntry);
+        }
+        catch (Throwable ex) {
+            Debug.echoError(scriptEntry, "Woah! An exception has been called while reading this command's arguments!");
+            Debug.echoError(scriptEntry, ex);
+            return false;
+        }
+        finally {
+            setCurrentQueue(null);
+            Debug.setCurrentContext(lastContext);
+        }
+        Debug.verboseLog("Command '" + command.getName() + "' handed to the main thread without waiting, from thread '" + Thread.currentThread().getName() + "'.");
+        DenizenCore.runOnMainThread(() -> {
+            TagContext priorContext = Debug.getCurrentContext();
+            try {
+                setCurrentQueue(queue);
+                Debug.setCurrentContext(scriptEntry.getContext());
+                command.execute(scriptEntry);
+            }
+            catch (Throwable ex) {
+                // Note this surfaces after the script has moved on, so the error is reported against the entry rather than the current queue state.
+                Debug.echoError(scriptEntry, "Woah! An exception has been called with this command (handed over by an async script)!");
+                Debug.echoError(scriptEntry, ex);
+            }
+            finally {
+                setCurrentQueue(null);
+                Debug.setCurrentContext(priorContext);
+            }
+        });
+        return true;
     }
 
     /** Executes a script entry on the current thread. Prefer {@link #execute(ScriptEntry)}, which handles thread selection. */
