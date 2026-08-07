@@ -13,6 +13,7 @@ import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
 import java.util.List;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class AsyncCommand extends BracedCommand {
 
@@ -63,13 +64,29 @@ public class AsyncCommand extends BracedCommand {
     // A "stop" command inside the block stops the whole queue, not just the block.
     //
     // Optionally specify 'detached' to let the script continue immediately instead of waiting for the block.
-    // A detached block is fire-and-forget: it gets a copy of the current definitions, and nothing it defines comes back.
     // A detached block always gets its own thread, including inside a queue that is already async - that is how it runs in parallel with the script that started it.
+    //
+    // A detached block starts from a copy of the current definitions, and the definitions it writes are applied back to the queue that started it when it finishes.
+    // Only the names the block actually wrote are applied, so anything the script defined in the meantime is kept.
+    // If both wrote the same name, the block's value wins, as it lands later.
+    //
+    // Because the block finishes at a time the script has no way to predict, a detached definition is NOT ready on the next line.
+    // Never guess with a 'wait' - use the save argument to check, or don't detach:
+    // <code>
+    // - async detached save:bg:
+    //     - define result <[input].parse_tag[<[parse_value].to_uppercase>]>
+    // # ... other work happens here, in parallel ...
+    // - waituntil rate:1t max:30s <entry[bg].created_queue.state.equals[unknown]>
+    // - narrate "<[result]>"
+    // </code>
+    //
+    // If you have no other work to do in the meantime, plain 'async' (without 'detached') is the right choice - it hands definitions back with no guesswork.
     //
     // A waiting (non-detached) block inside a queue that is already async simply runs inline, as a second thread would gain it nothing.
     // If async scripts are disabled in the Denizen config, any block runs inline. Either way it is never an error to use.
     //
     // @Tags
+    // <entry[saveName].created_queue> returns the queue the block runs in. Its 'state' tag reads 'running' until the block is done.
     // <queue.is_async> returns whether the current queue runs off-thread (true inside a non-detached block).
     // <util.is_main_thread> returns whether the tag itself is being read on the main thread.
     //
@@ -81,10 +98,12 @@ public class AsyncCommand extends BracedCommand {
     // - narrate "Top 10: <[top].comma_separated>"
     //
     // @Usage
-    // Use to run a slow section in the background while the script carries on.
-    // - async detached:
-    //     - ~run heavy_report_generator
-    // - narrate "Report is being generated, check back later!"
+    // Use to run a slow section in the background while the script carries on, then collect the result.
+    // - async detached save:bg:
+    //     - define report <server.flag[stats].parse_tag[<[parse_value].sort_by_value>]>
+    // - narrate "Generating your report..."
+    // - waituntil rate:1t max:30s <entry[bg].created_queue.state.equals[unknown]>
+    // - narrate "Done: <[report]>"
     // -->
 
     /** Shared between an async block's main entry and the marker entry appended to the end of its sub-queue. */
@@ -175,15 +194,32 @@ public class AsyncCommand extends BracedCommand {
             entry.updateContext();
         }
         subQueue.addEntries(entries);
+        scriptEntry.saveObject("created_queue", new QueueTag(subQueue));
+        ScriptQueue outerQueue = queue;
         if (detached) {
-            // Nothing to hand back, so release the outer queue right away and let it carry on.
+            // The outer queue keeps running alongside the block, so its definitions can't simply be replaced at the end -
+            // it may have defined things of its own in the meantime. Track what the block writes and merge back only that.
+            subQueue.trackedDefinitionWrites = ConcurrentHashMap.newKeySet();
+            subQueue.callBack(() -> outerQueue.runOnQueueThread(() -> mergeDetachedDefinitions(outerQueue, subQueue)));
             scriptEntry.setFinished(true);
             subQueue.start();
             return;
         }
-        ScriptQueue outerQueue = queue;
         subQueue.callBack(() -> outerQueue.runOnQueueThread(() -> finishBlock(scriptEntry, outerQueue, subQueue, data)));
         subQueue.start();
+    }
+
+    /**
+     * Merges a finished detached block's definitions into the queue that started it.
+     * <p>
+     * Always runs on the outer queue's own thread (between its commands, never during one), which is what makes this safe
+     * despite the two queues having run at the same time - see {@link ScriptQueue#runOnQueueThread}.
+     */
+    public static void mergeDetachedDefinitions(ScriptQueue outerQueue, AsyncQueue subQueue) {
+        for (String key : subQueue.trackedDefinitionWrites) {
+            // A definition the block removed reads back as null here, which 'putObject' turns into a removal on the outer queue too.
+            outerQueue.definitions.putObject(key, subQueue.definitions.getObject(key));
+        }
     }
 
     /** Applies a finished block's results to the outer queue and releases it. Always runs on the outer queue's own thread. */

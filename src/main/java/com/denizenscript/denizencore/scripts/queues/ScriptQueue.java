@@ -94,6 +94,14 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     public MapTag definitions = new MapTag();
 
+    /**
+     * If set, every definition written on this queue records its top-level name here.
+     * Used by a detached <@link command async> block to merge just the definitions it actually wrote back into the queue that started it,
+     * rather than overwriting that queue's whole set (which would discard anything it defined while the block was running).
+     * Null (the default) means no tracking, at zero cost.
+     */
+    public Set<String> trackedDefinitionWrites = null;
+
     public ListTag determinations = null;
 
     public ScriptTag script;
@@ -204,6 +212,11 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             if (DenizenCore.implementation.setSpecialDef(definition, this, value)) {
                 return;
             }
+        }
+        if (trackedDefinitionWrites != null) {
+            // Sub-mapped names ('x.y.z') are recorded by their root, as that's the whole value that gets handed back.
+            int dotIndex = definition.indexOf('.');
+            trackedDefinitionWrites.add(dotIndex == -1 ? definition : definition.substring(0, dotIndex));
         }
         definitions.putDeepObject(definition, value);
     }
