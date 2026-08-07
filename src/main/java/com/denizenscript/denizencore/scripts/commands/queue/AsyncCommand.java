@@ -2,7 +2,6 @@ package com.denizenscript.denizencore.scripts.commands.queue;
 
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.objects.Argument;
-import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.objects.core.QueueTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
@@ -85,6 +84,10 @@ public class AsyncCommand extends BracedCommand {
     // A waiting (non-detached) block inside a queue that is already async simply runs inline, as a second thread would gain it nothing.
     // If async scripts are disabled in the Denizen config, any block runs inline. Either way it is never an error to use.
     //
+    // Blocks time themselves, and one that has never cost enough main thread time to be worth a thread hand-off simply runs on the main thread,
+    // which skips the tick of waiting entirely. Nothing else about it changes. So a block that turns out to be trivial costs nothing for having been written,
+    // and there is no need to guess in advance whether a section is heavy enough to be worth marking async.
+    //
     // @Tags
     // <entry[saveName].created_queue> returns the queue the block runs in. Its 'state' tag reads 'running' until the block is done.
     // <queue.is_async> returns whether the current queue runs off-thread (true inside a non-detached block).
@@ -114,6 +117,9 @@ public class AsyncCommand extends BracedCommand {
          * Still false when the block is over means something cut it short - a 'stop' command, or an error that killed the sub-queue.
          */
         public volatile boolean reachedEnd = false;
+
+        /** When the block's contents started running, for the self-measurement described on {@link CoreConfiguration#asyncBlockInlineThresholdNanos}. */
+        public long startNanos;
     }
 
     @Override
@@ -129,13 +135,21 @@ public class AsyncCommand extends BracedCommand {
     @Override
     public void execute(ScriptEntry scriptEntry) {
         if (scriptEntry.argAsBoolean("\0callback")) {
-            if (scriptEntry.getOwner() != null && scriptEntry.getOwner().getData() instanceof AsyncData) {
-                ((AsyncData) scriptEntry.getOwner().getData()).reachedEnd = true;
+            ScriptEntry owner = scriptEntry.getOwner();
+            if (owner != null && owner.getData() instanceof AsyncData) {
+                AsyncData data = (AsyncData) owner.getData();
+                data.reachedEnd = true;
+                // Reaching the marker means the block ran to its end, so this is the honest cost of its contents,
+                // measured the same way whether it ran on a worker or inline.
+                long elapsed = System.nanoTime() - data.startNanos;
+                if (elapsed > owner.internal.asyncBlockMaxNanos) {
+                    owner.internal.asyncBlockMaxNanos = elapsed;
+                }
             }
             else {
                 Debug.echoError(scriptEntry, "Async CALLBACK invalid: not a real callback!");
             }
-            // 'forceHold' applies to this marker entry too, so it has to release the sub-queue itself.
+            // 'forceHold' applies to this marker entry too, so it has to release its queue itself.
             scriptEntry.setFinished(true);
             return;
         }
@@ -150,10 +164,18 @@ public class AsyncCommand extends BracedCommand {
             scriptEntry.setFinished(true);
             return;
         }
-        if ((queue.isAsync() && !detached) || !CoreConfiguration.allowAsyncScripts) {
-            // A waiting block on a queue that's already off-thread gains nothing from a second thread, so it just runs inline.
-            // A detached block is different: it means "don't wait for this", which inlining would silently break, so that still gets its own queue below.
-            // Async being switched off entirely overrides both - there is no thread to run on.
+        AsyncData data = new AsyncData();
+        data.startNanos = System.nanoTime();
+        scriptEntry.setData(data);
+        ScriptEntry markerEntry = new ScriptEntry("ASYNC", new String[]{"\0CALLBACK"}, scriptEntry.getScriptContainer());
+        markerEntry.copyFrom(scriptEntry);
+        markerEntry.setOwner(scriptEntry);
+        entries.add(markerEntry);
+        if ((queue.isAsync() && !detached) || !CoreConfiguration.allowAsyncScripts || isKnownCheap(scriptEntry, detached)) {
+            // Run the block right here, in this queue, on this thread. Identical in every observable way to the worker path -
+            // same definitions, same ordering, same 'stop' behaviour - it just skips the thread hand-off and the tick of waiting it costs.
+            // Reasons to end up here: the queue is already off-thread so a second thread would gain nothing; async is switched off entirely;
+            // or the block has measured itself as too cheap for a hand-off to be worth it.
             for (ScriptEntry entry : entries) {
                 entry.setInstant(true);
             }
@@ -161,33 +183,31 @@ public class AsyncCommand extends BracedCommand {
             queue.injectEntriesAtStart(entries);
             return;
         }
-        MapTag blockDefinitions = null;
         if (!detached && !(queue instanceof TimedQueue)) {
             // Waiting for the block will force this queue to become a timed queue - do that now, before the worker thread starts.
             // If it happened later (from ScriptEngine.shouldHold), the main thread would be copying the queue's definitions
             // at the same moment the worker is writing to them.
-            ScriptQueue deadQueue = queue;
             queue.forceToTimed(null);
             queue = scriptEntry.getResidingQueue();
-            // That conversion already handed the outer queue a fresh deep copy and left the old queue dead (stopped, cleared, and skipped
-            // by 'QueueTag.ensure'), so its map has no readers left and the block can simply take it.
-            // Duplicating a second time here would cost the main thread exactly the kind of work the block exists to move off it.
-            blockDefinitions = deadQueue.definitions;
         }
         AsyncQueue subQueue = new AsyncQueue("ASYNC");
         subQueue.debugOutput = queue.debugOutput;
         subQueue.procedural = queue.procedural;
         subQueue.setContextSource(queue.contextSource);
         subQueue.determinationTarget = queue.determinationTarget;
-        // The block works on its own copy of the definitions, which replaces the outer queue's set once the block is done.
-        // Sharing one map instead would have the worker thread and the main thread writing to it at the same time.
-        subQueue.definitions = blockDefinitions != null ? blockDefinitions : queue.definitions.duplicate();
-        AsyncData data = new AsyncData();
-        scriptEntry.setData(data);
-        ScriptEntry callbackEntry = new ScriptEntry("ASYNC", new String[]{"\0CALLBACK"}, scriptEntry.getScriptContainer());
-        callbackEntry.copyFrom(scriptEntry);
-        callbackEntry.setOwner(scriptEntry);
-        entries.add(callbackEntry);
+        if (detached) {
+            // A detached block runs alongside the outer queue, so the two really do need separate maps - there is no moment when only one of them is writing.
+            // This copy is deep, and so costs in proportion to how much the queue has defined. It is the price of running in parallel;
+            // if it shows up in a profile, the answer is to not detach in a hot path rather than to make the copy unsafe.
+            subQueue.definitions = queue.definitions.duplicate();
+        }
+        else {
+            // A waiting block is different: the outer queue is held for the whole of it and executes nothing, so at any instant exactly one of
+            // the two queues is touching this map. Handing it over as-is is therefore safe, and skips a deep copy of every definition the script holds.
+            // The one thing this gives up is another script reading '<queue[id].definition[x]>' on the held queue mid-block, which would now
+            // be reading a map the worker is writing. That was already an odd thing to do, and it is worth what the copy was costing.
+            subQueue.definitions = queue.definitions;
+        }
         for (ScriptEntry entry : entries) {
             entry.setInstant(true);
             entry.setSendingQueue(subQueue);
@@ -207,6 +227,27 @@ public class AsyncCommand extends BracedCommand {
         }
         subQueue.callBack(() -> outerQueue.runOnQueueThread(() -> finishBlock(scriptEntry, outerQueue, subQueue, data)));
         subQueue.start();
+    }
+
+    /**
+     * Returns true if this block has run before and never cost enough main thread time to be worth handing to another thread.
+     * <p>
+     * A block only pays off when the work it moves off the main thread is worth more than the tick of latency the hand-off costs the script.
+     * Rather than making script writers judge that, each block times itself (see {@link AsyncData#startNanos}) and answers it from its own history.
+     * The first run always goes to a worker, since nothing is known about it yet, and one run that is expensive settles the question for good -
+     * the maximum is what's compared, so a block that is usually fast but sometimes slow keeps its thread.
+     */
+    public static boolean isKnownCheap(ScriptEntry scriptEntry, boolean detached) {
+        if (detached) {
+            // 'detached' is a promise not to wait, which running inline would break no matter how cheap the contents are.
+            return false;
+        }
+        long threshold = CoreConfiguration.asyncBlockInlineThresholdNanos;
+        if (threshold <= 0) {
+            return false;
+        }
+        long maxSeen = scriptEntry.internal.asyncBlockMaxNanos;
+        return maxSeen >= 0 && maxSeen < threshold;
     }
 
     /**

@@ -56,6 +56,17 @@ public class CoreConfiguration {
      */
     public static long asyncShutdownTimeoutMillis = 3000;
 
+    /**
+     * An <@link command async> block whose contents have never taken longer than this (in nanoseconds) runs on the main thread instead of a worker.
+     * <p>
+     * Handing a block to another thread costs the script up to a tick of waiting, because the main thread can only resume it on its next pass.
+     * That is worth paying to keep a slow block off the main thread, and pure waste for a block the main thread would not have noticed.
+     * Each block is measured as it runs, so this decides itself per script line rather than needing the script writer to guess.
+     * <p>
+     * Set to 0 to always hand blocks to a worker.
+     */
+    public static long asyncBlockInlineThresholdNanos = 250_000; // 0.25ms
+
     public static boolean queueIdPrefix = true, queueIdNumeric = true, queueIdWords = true;
 
     public static boolean listFlagsAllowed = false;

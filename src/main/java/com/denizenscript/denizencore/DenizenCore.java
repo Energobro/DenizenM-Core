@@ -417,5 +417,9 @@ public class DenizenCore {
                 timedQueues.remove(i--);
             }
         }
+        // Second pass, because the loop above is where scripts actually run, and so it's where async work gets dispatched and where async queues
+        // ask the main thread for the commands they can't run themselves. Anything that arrived during it would otherwise sit until the next tick.
+        // Serving it here instead costs a poll of an empty queue when there's nothing waiting, and saves a full tick of latency when there is.
+        runMainThreadTasks();
     }
 }

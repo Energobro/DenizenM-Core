@@ -92,6 +92,13 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         public ScriptEntry asyncOwner = null;
 
         /**
+         * For an <@link command async> block: the longest its contents have ever taken to run, in nanoseconds. -1 means it has never run yet.
+         * Shared between clones on purpose - this measures one line of one script, however many times it runs.
+         * See {@link com.denizenscript.denizencore.utilities.CoreConfiguration#asyncBlockInlineThresholdNanos}.
+         */
+        public volatile long asyncBlockMaxNanos = -1;
+
+        /**
          * Creates a copy of this internal data with its own private argument objects.
          * <p>
          * Normally, cloned script entries share their internals (including the single reusable Argument object per raw argument),
@@ -120,6 +127,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             result.booleans = booleans == null ? null : booleans.clone();
             result.shouldDebugBool = shouldDebugBool;
             result.defObjects = defObjects;
+            result.asyncBlockMaxNanos = asyncBlockMaxNanos;
             if (preprocArgs != null) {
                 result.preprocArgs = new ArrayList<>(preprocArgs.size());
                 for (Argument arg : preprocArgs) {
