@@ -20,6 +20,7 @@ public class InjectCommand extends AbstractCommand {
         setSyntax("inject [<script>] (path:<name>) (instantly)");
         setRequiredArguments(1, 3);
         isProcedural = true;
+        asyncSafe = true; // Only reads script data and touches its own queue.
     }
 
     // <--[command]

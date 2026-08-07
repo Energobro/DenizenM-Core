@@ -132,6 +132,7 @@ public class CommandRegistry {
         registerCommand(LogCommand.class);
         registerCommand(YamlCommand.class);
         // queue
+        registerCommand(AsyncCommand.class);
         registerCommand(ChooseCommand.class);
         registerCommand(DefineCommand.class);
         registerCommand(DefineMapCommand.class);

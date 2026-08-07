@@ -1,5 +1,6 @@
 package com.denizenscript.denizencore.scripts.queues;
 
+import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.scripts.commands.CommandExecutor;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
@@ -25,9 +26,11 @@ public class ScriptEngine {
         return true;
     }
 
-    /** Prepares an entry for execution within its queue, including giving it isolated internals if the queue runs off-thread. */
+    /** Prepares an entry for execution within its queue, including giving it isolated internals if it's about to run off-thread. */
     static void prepareEntry(ScriptQueue scriptQueue, ScriptEntry scriptEntry) {
-        if (scriptQueue.isAsync()) {
+        // The thread check matters on top of the queue check: a plain (non-async) queue still runs on whichever thread started it,
+        // which for a sub-queue built by an async script (a 'proc' tag, an 'inject', ...) is that script's worker thread.
+        if (scriptQueue.isAsync() || !DenizenCore.isMainThread()) {
             scriptEntry.makeAsyncSafe();
         }
         scriptEntry.setSendingQueue(scriptQueue);

@@ -1,5 +1,6 @@
 package com.denizenscript.denizencore.scripts.commands.queue;
 
+import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsRuntimeException;
 import com.denizenscript.denizencore.objects.Argument;
@@ -18,6 +19,7 @@ public class DetermineCommand extends AbstractCommand {
         setRequiredArguments(1, 2);
         isProcedural = true;
         setBooleanHandled("passively");
+        asyncSafe = true; // Only touches its own queue - the one part that can reach outside (the determination target) is handed to the main thread below.
     }
 
     // <--[command]
@@ -84,7 +86,9 @@ public class DetermineCommand extends AbstractCommand {
         }
         determines.addObject(outcomeArg.hasPrefix() ? outcomeArg.getRawElement() : outcomeArg.object);
         if (queue.determinationTarget != null) {
-            queue.determinationTarget.applyDetermination(outcomeArg.prefix, outcomeArg.object);
+            // Determining onto a target (an event, usually) reaches outside the queue, so it has to happen on the main thread.
+            // Procedure scripts have no target, which is what makes '<proc[...]>' fully off-thread for an async queue.
+            DenizenCore.runOnMainThreadAndWait(() -> queue.determinationTarget.applyDetermination(outcomeArg.prefix, outcomeArg.object));
         }
 
         if (!passively) {

@@ -140,7 +140,8 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     // An "async queue" instead runs its commands on a separate thread, meaning the script's own logic (tags, math, text handling, ...)
     // does not consume main thread time, and a slow script cannot lag the server.
     //
-    // Async queues are created by the "async" argument of <@link command run>, or by the DenizenCore API (see 'ScriptUtilities.createAndStartQueueAsync').
+    // Async queues are created by <@link command async>, by the "async" argument of <@link command run>,
+    // or by the DenizenCore API (see 'ScriptUtilities.createAndStartQueueAsync').
     //
     // Commands are marked internally as async-safe or not. Any command that is not async-safe is automatically handed to the main thread
     // and the async queue simply waits for it to complete - so scripts remain correct, they just don't gain any speed from those commands.
