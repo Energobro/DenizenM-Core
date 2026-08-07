@@ -98,10 +98,14 @@ public class AsyncQueue extends TimedQueue {
         DenizenCore.runAsync(this::runLoop);
     }
 
+    /** Whether the count warning has already been given, so that a busy server gets it once rather than on every queue it starts. */
+    private static volatile boolean warnedOnCount = false;
+
     /** The worker loop. Runs on the async thread for the entire life of the queue. */
     public void runLoop() {
         ownerThread = Thread.currentThread();
         runningQueues.add(this);
+        checkQueueCount();
         try {
             while (is_started && !isStopped && !abandoned) {
                 runPendingTasks();
@@ -132,6 +136,28 @@ public class AsyncQueue extends TimedQueue {
                     Debug.echoError(ex);
                 }
             }
+        }
+    }
+
+    /**
+     * Says something once when a lot of async queues are running at the same time.
+     * <p>
+     * Each one holds a thread for its whole life, so this is a script starting more threads than it probably meant to.
+     * Warns on the way up and re-arms once the count has fallen well back, so a server hovering around the threshold isn't spammed.
+     */
+    public static void checkQueueCount() {
+        int threshold = CoreConfiguration.asyncQueueCountWarning;
+        if (threshold <= 0) {
+            return;
+        }
+        int count = runningQueues.size();
+        if (!warnedOnCount && count >= threshold) {
+            warnedOnCount = true;
+            Debug.echoError(count + " async script queues are running at once. Each one holds a thread for as long as it lives, including while waiting,"
+                    + " so this many is usually a script starting async queues in a loop. Consider one queue that processes a list instead.");
+        }
+        else if (warnedOnCount && count < threshold / 2) {
+            warnedOnCount = false;
         }
     }
 

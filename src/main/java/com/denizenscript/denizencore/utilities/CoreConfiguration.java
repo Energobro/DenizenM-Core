@@ -57,6 +57,15 @@ public class CoreConfiguration {
     public static long asyncShutdownTimeoutMillis = 3000;
 
     /**
+     * Warn once when this many async queues are running at the same time. Set to 0 to never warn.
+     * <p>
+     * Each async queue owns a thread for its whole life, including while it sits in a 'wait', so a script that starts them in bulk
+     * quietly turns into that many threads. There is no cap on purpose - capping would leave a new queue unable to start at all -
+     * so this is the only warning a server gets before the thread count becomes a problem.
+     */
+    public static int asyncQueueCountWarning = 50;
+
+    /**
      * An <@link command async> block whose contents have never taken longer than this (in nanoseconds) runs on the main thread instead of a worker.
      * <p>
      * Handing a block to another thread costs the script up to a tick of waiting, because the main thread can only resume it on its next pass.
