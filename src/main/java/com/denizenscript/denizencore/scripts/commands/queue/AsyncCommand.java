@@ -64,8 +64,10 @@ public class AsyncCommand extends BracedCommand {
     //
     // Optionally specify 'detached' to let the script continue immediately instead of waiting for the block.
     // A detached block is fire-and-forget: it gets a copy of the current definitions, and nothing it defines comes back.
+    // A detached block always gets its own thread, including inside a queue that is already async - that is how it runs in parallel with the script that started it.
     //
-    // If async scripts are disabled in the Denizen config, or the queue is already an async queue, the block simply runs inline - it is never an error to use.
+    // A waiting (non-detached) block inside a queue that is already async simply runs inline, as a second thread would gain it nothing.
+    // If async scripts are disabled in the Denizen config, any block runs inline. Either way it is never an error to use.
     //
     // @Tags
     // <queue.is_async> returns whether the current queue runs off-thread (true inside a non-detached block).
@@ -129,8 +131,10 @@ public class AsyncCommand extends BracedCommand {
             scriptEntry.setFinished(true);
             return;
         }
-        if (queue.isAsync() || !CoreConfiguration.allowAsyncScripts) {
-            // Already off-thread (or async is switched off entirely) - a second thread would gain nothing, so just run the block inline.
+        if ((queue.isAsync() && !detached) || !CoreConfiguration.allowAsyncScripts) {
+            // A waiting block on a queue that's already off-thread gains nothing from a second thread, so it just runs inline.
+            // A detached block is different: it means "don't wait for this", which inlining would silently break, so that still gets its own queue below.
+            // Async being switched off entirely overrides both - there is no thread to run on.
             for (ScriptEntry entry : entries) {
                 entry.setInstant(true);
             }
