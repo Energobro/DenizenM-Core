@@ -217,12 +217,16 @@ public class TagManager {
         if (baseHandler != null && !DenizenCore.isMainThread() && requiresMainThread(baseHandler, event)) {
             // This tag reads live server state, so it can't be read from an async script's thread - let the main thread do it while we wait.
             Debug.verboseLog("Tag '" + event.raw_tag + "' must be read on the main thread, handing it over from thread '" + Thread.currentThread().getName() + "'.");
+            long waitStart = System.nanoTime();
             try {
                 DenizenCore.runOnMainThreadAndWait(() -> fireEvent(event));
             }
             catch (Throwable ex) {
                 Debug.echoError("Failed to read tag '" + event.raw_tag + "' on the main thread (requested by an async script):");
                 Debug.echoError(ex);
+            }
+            finally {
+                com.denizenscript.denizencore.scripts.queues.ScriptQueue.recordMainThreadWait(null, System.nanoTime() - waitStart);
             }
             return;
         }

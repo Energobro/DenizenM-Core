@@ -5,6 +5,7 @@ import com.denizenscript.denizencore.events.ScriptEvent;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
+import com.denizenscript.denizencore.scripts.commands.CommandExecutor;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.*;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
@@ -160,6 +161,26 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     //
     // See also <@link language ~waitable> for the simpler option of just moving a single command off-thread with the "~" prefix.
     // -->
+
+    /**
+     * How many times this queue has had to stop and wait for the main thread, and how long that has cost in total (nanoseconds).
+     * <p>
+     * This is the number that decides whether running a script off-thread was worth doing: a queue that spends most of its life here
+     * is not gaining anything from async, it's just paying for the privilege. See <@link tag QueueTag.async_stats>.
+     * Only the queue's own thread writes these, so plain volatile is enough.
+     */
+    public volatile long mainThreadWaitCount, mainThreadWaitNanos;
+
+    /** Records time this queue spent waiting on the main thread. Pass null to attribute it to whatever queue is running on this thread, if any. */
+    public static void recordMainThreadWait(ScriptQueue queue, long nanos) {
+        if (queue == null) {
+            queue = CommandExecutor.getCurrentQueue();
+        }
+        if (queue != null) {
+            queue.mainThreadWaitCount++;
+            queue.mainThreadWaitNanos += nanos;
+        }
+    }
 
     /** Returns true if this queue runs its script entries on a thread other than the main thread. */
     public boolean isAsync() {
@@ -441,7 +462,15 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             return;
         }
         if (queueNeedsToDebug()) {
-            queueDebug("Completing queue '<QUEUE>' in <A>" + ((System.nanoTime() - startTime) / 1000000) + "<O>ms.");
+            long totalMs = (System.nanoTime() - startTime) / 1000000;
+            queueDebug("Completing queue '<QUEUE>' in <A>" + totalMs + "<O>ms.");
+            if (mainThreadWaitCount > 0) {
+                // The single most useful number for anyone using async: how much of the queue's life was spent not running.
+                long waitMs = mainThreadWaitNanos / 1000000;
+                queueDebug("Queue '<QUEUE>' waited on the main thread <A>" + waitMs + "<O>ms across <A>" + mainThreadWaitCount + "<O> hand-off(s)"
+                        + (totalMs > 0 ? " - <A>" + (waitMs * 100 / totalMs) + "%<O> of its runtime" : "")
+                        + ". If that share is large, this script gains little from running off-thread.");
+            }
         }
         if (callback != null) {
             callback.run();

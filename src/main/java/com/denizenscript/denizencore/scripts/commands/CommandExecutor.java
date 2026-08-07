@@ -135,6 +135,7 @@ public class CommandExecutor {
             // This command can't safely run off-thread, so the async queue waits while the main thread runs it.
             Debug.verboseLog("Command '" + command.getName() + "' isn't async-safe, handing it to the main thread from thread '" + Thread.currentThread().getName() + "'.");
             boolean[] result = new boolean[1];
+            long waitStart = System.nanoTime();
             try {
                 DenizenCore.runOnMainThreadAndWait(() -> result[0] = executeInternal(scriptEntry));
             }
@@ -143,6 +144,10 @@ public class CommandExecutor {
                 Debug.echoError(scriptEntry, ex);
                 scriptEntry.setFinished(true);
                 return false;
+            }
+            finally {
+                // The queue is read from the entry rather than the thread, as the thread's 'current queue' is only set once execution actually starts.
+                ScriptQueue.recordMainThreadWait(scriptEntry.getResidingQueue(), System.nanoTime() - waitStart);
             }
             return result[0];
         }

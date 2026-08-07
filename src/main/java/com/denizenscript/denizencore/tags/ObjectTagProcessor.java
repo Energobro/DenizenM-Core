@@ -171,6 +171,7 @@ public class ObjectTagProcessor<T extends ObjectTag> {
             // The whole remaining tag runs on the main thread in one hand-off - the recursive call below sees the main thread and proceeds normally.
             Debug.verboseLog("Tag '" + nextComponent.key + "' on a main-thread-only object, handing it over from thread '" + Thread.currentThread().getName() + "'.");
             ObjectTag[] result = new ObjectTag[1];
+            long waitStart = System.nanoTime();
             try {
                 DenizenCore.runOnMainThreadAndWait(() -> result[0] = getObjectAttribute(object, attribute));
             }
@@ -178,6 +179,9 @@ public class ObjectTagProcessor<T extends ObjectTag> {
                 attribute.echoError("Failed to read tag '" + nextComponent.key + "' on the main thread (requested by an async script):");
                 attribute.echoError(ex);
                 return null;
+            }
+            finally {
+                com.denizenscript.denizencore.scripts.queues.ScriptQueue.recordMainThreadWait(null, System.nanoTime() - waitStart);
             }
             return result[0];
         }

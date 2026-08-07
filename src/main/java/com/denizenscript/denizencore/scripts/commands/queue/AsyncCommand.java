@@ -1,10 +1,14 @@
 package com.denizenscript.denizencore.scripts.commands.queue;
 
-import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
-import com.denizenscript.denizencore.objects.Argument;
+import com.denizenscript.denizencore.objects.ObjectTag;
+import com.denizenscript.denizencore.objects.core.ListTag;
+import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.objects.core.QueueTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgDefaultNull;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.scripts.queues.core.AsyncQueue;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
@@ -18,9 +22,12 @@ public class AsyncCommand extends BracedCommand {
 
     public AsyncCommand() {
         setName("async");
-        setSyntax("async (detached) [<commands>]");
-        setRequiredArguments(0, 1);
-        setBooleansHandled("detached", "\0callback");
+        setSyntax("async (detached) (copy_defs:<name>|...) [<commands>]");
+        setRequiredArguments(0, 2);
+        // Only the marker is registered by hand - 'detached' is registered by autoCompile, from the autoExecute signature.
+        // Registering it in both places would hand out two indices for one name and overrun the entry's boolean array.
+        setBooleansHandled("\0callback");
+        autoCompile();
         asyncSafe = true; // Only touches its own queue and thread-safe data.
         forceHold = true; // A block command has nowhere to write a '~', so it holds its queue by default instead.
     }
@@ -65,7 +72,14 @@ public class AsyncCommand extends BracedCommand {
     // Optionally specify 'detached' to let the script continue immediately instead of waiting for the block.
     // A detached block always gets its own thread, including inside a queue that is already async - that is how it runs in parallel with the script that started it.
     //
-    // A detached block starts from a copy of the current definitions, and the definitions it writes are applied back to the queue that started it when it finishes.
+    // A detached block starts from a copy of the current definitions, because it and the script that started it run at the same moment and so cannot share one set.
+    // That copy is deep, so a queue holding large definitions pays for all of them on every detached block, however few it reads.
+    // Specify 'copy_defs:' with the names it actually needs to copy only those - this is what makes a detached block cheap enough to use inside a loop:
+    // <code>
+    // - async detached copy_defs:path|index:
+    //     - define next_point <[path].get[<[index]>].parsed>
+    // </code>
+    // Definitions the block writes are applied back to the queue that started it when it finishes, whether or not they were copied in.
     // Only the names the block actually wrote are applied, so anything the script defined in the meantime is kept.
     // If both wrote the same name, the block's value wins, as it lands later.
     //
@@ -122,18 +136,8 @@ public class AsyncCommand extends BracedCommand {
         public long startNanos;
     }
 
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (arg.matches("{")) {
-                break;
-            }
-            arg.reportUnhandled();
-        }
-    }
-
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
+    public static void autoExecute(ScriptEntry scriptEntry, @ArgName("detached") boolean detached,
+                                   @ArgPrefixed @ArgName("copy_defs") @ArgDefaultNull ListTag copyDefs) {
         if (scriptEntry.argAsBoolean("\0callback")) {
             ScriptEntry owner = scriptEntry.getOwner();
             if (owner != null && owner.getData() instanceof AsyncData) {
@@ -153,10 +157,9 @@ public class AsyncCommand extends BracedCommand {
             scriptEntry.setFinished(true);
             return;
         }
-        boolean detached = scriptEntry.argAsBoolean("detached");
         ScriptQueue queue = scriptEntry.getResidingQueue();
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, getName(), db("detached", detached), new QueueTag(queue));
+            Debug.report(scriptEntry, "Async", db("detached", detached), new QueueTag(queue));
         }
         List<ScriptEntry> entries = getBracedCommandsDirect(scriptEntry, scriptEntry);
         if (entries == null || entries.isEmpty()) {
@@ -197,9 +200,21 @@ public class AsyncCommand extends BracedCommand {
         subQueue.determinationTarget = queue.determinationTarget;
         if (detached) {
             // A detached block runs alongside the outer queue, so the two really do need separate maps - there is no moment when only one of them is writing.
-            // This copy is deep, and so costs in proportion to how much the queue has defined. It is the price of running in parallel;
-            // if it shows up in a profile, the answer is to not detach in a hot path rather than to make the copy unsafe.
-            subQueue.definitions = queue.definitions.duplicate();
+            // That copy is deep, so it costs in proportion to everything the queue has defined, however little of it the block actually reads.
+            // 'copy_defs' lets a script say which definitions it needs and skip the rest, which is what makes a detached block affordable in a loop.
+            if (copyDefs != null) {
+                MapTag subset = new MapTag();
+                for (String name : copyDefs) {
+                    ObjectTag value = queue.getDefinitionObject(name);
+                    if (value != null) {
+                        subset.putDeepObject(name, value.duplicate());
+                    }
+                }
+                subQueue.definitions = subset;
+            }
+            else {
+                subQueue.definitions = queue.definitions.duplicate();
+            }
         }
         else {
             // A waiting block is different: the outer queue is held for the whole of it and executes nothing, so at any instant exactly one of

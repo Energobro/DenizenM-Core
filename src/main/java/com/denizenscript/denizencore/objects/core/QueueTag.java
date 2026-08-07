@@ -221,6 +221,28 @@ public class QueueTag implements ObjectTag, Adjustable, FlaggableObject {
         });
 
         // <--[tag]
+        // @attribute <QueueTag.async_stats>
+        // @returns MapTag
+        // @description
+        // Returns a map describing how much this queue has had to wait on the server's main thread, with keys:
+        // 'handoffs' (ElementTag(Number)) - how many times it stopped and waited, and
+        // 'wait_time' (DurationTag) - how long that cost in total.
+        //
+        // Every command or tag that isn't safe to run off-thread costs one hand-off, and each one waits up to a tick.
+        // So this is the number that answers "is running this script off-thread actually helping?" - compare it against
+        // <@link tag QueueTag.time_ran>. A queue that spent most of its life waiting would run faster on the main thread.
+        // Refer to <@link language Async Queues>.
+        //
+        // Always zero for a queue that has never run off the main thread.
+        // -->
+        tagProcessor.registerTag(MapTag.class, "async_stats", (attribute, object) -> {
+            MapTag result = new MapTag();
+            result.putObject("handoffs", new ElementTag(object.getQueue().mainThreadWaitCount));
+            result.putObject("wait_time", new DurationTag(object.getQueue().mainThreadWaitNanos / 1000000.0 / 1000.0));
+            return result;
+        });
+
+        // <--[tag]
         // @attribute <QueueTag.state>
         // @returns ElementTag
         // @description
