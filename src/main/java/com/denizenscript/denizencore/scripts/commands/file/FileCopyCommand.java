@@ -21,6 +21,7 @@ public class FileCopyCommand extends AbstractCommand implements Holdable {
         setSyntax("filecopy [origin:<origin>] [destination:<destination>] (overwrite)");
         setRequiredArguments(2, 3);
         isProcedural = false;
+        asyncSafe = true; // Only copies files - and without '~' the copy is a blocking one, which is all the more reason to keep it off the main thread.
         autoCompile();
         addRemappedPrefixes("destination", "d");
         addRemappedPrefixes("origin", "o");

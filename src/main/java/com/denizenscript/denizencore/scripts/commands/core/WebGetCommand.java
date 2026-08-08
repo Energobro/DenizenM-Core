@@ -31,6 +31,7 @@ public class WebGetCommand extends AbstractCommand implements Holdable {
         setSyntax("webget [<url>] (data:<data>) (method:<method>) (headers:<map>) (timeout:<duration>/{10s}) (savefile:<path>) (hide_failure)");
         setRequiredArguments(1, 7);
         isProcedural = false;
+        asyncSafe = true; // Reads its arguments and starts a thread for the request itself - the main thread was never doing the waiting anyway.
         autoCompile();
         addRemappedPrefixes("data", "post");
         addRemappedPrefixes("timeout", "t");

@@ -20,6 +20,7 @@ public class LogCommand extends AbstractCommand implements Holdable {
         setSyntax("log [<text>] (type:{info}/severe/warning/fine/finer/finest/none/clear) [file:<name>]");
         setRequiredArguments(2, 3);
         isProcedural = false;
+        asyncSafe = true; // Only writes to a log file - and without '~' the write is a blocking one, which is all the more reason to keep it off the main thread.
         autoCompile();
     }
 

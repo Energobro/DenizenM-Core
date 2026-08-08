@@ -78,6 +78,12 @@ public class TagManager {
          */
         public HashSet<String> asyncSafeSubTags;
 
+        /**
+         * If true, this base written on its own - no sub-tag and no parameter - is safe to read off-thread even though the base is main-thread-only.
+         * See {@link TagManager#markBareBaseAsyncSafe}.
+         */
+        public boolean asyncSafeBare;
+
         public TagBaseData() {
         }
 
@@ -154,6 +160,12 @@ public class TagManager {
     //
     // The consequence is that such tags are safe, but slow: they cost main thread time as usual, plus up to a tick of waiting.
     // So an async script that mostly reads live server state gains nothing; async is for scripts that mostly process data.
+    //
+    // Reading such a value once into a definition, before the part of the script that uses it, is usually all it takes:
+    // "- define name <player.name>" ahead of a loop costs one hand-off, where "<player.name>" inside the loop costs one per pass.
+    //
+    // Note that a base written on its own, like "<player>" or "<npc>", is not one of these: it hands back an object the script's own queue
+    // is already holding, so it costs nothing. Reading anything off that object ("<player.name>") is what goes to the main thread.
     // -->
 
     /**
@@ -172,6 +184,23 @@ public class TagManager {
         if (asyncSafeSubTags.length > 0) {
             base.asyncSafeSubTags = new HashSet<>(Arrays.asList(asyncSafeSubTags));
         }
+    }
+
+    /**
+     * Marks the bare form of a main-thread-only tag base - the base written on its own, with no sub-tag and no parameter - as safe to read off-thread.
+     * <p>
+     * Only for a base whose bare form hands back something the script's own context already holds: "&lt;player&gt;" returns the queue's linked player
+     * without asking the server anything, while "&lt;player[bob]&gt;" has to go and find that player and so stays main-thread-only.
+     * The object that comes back is still main-thread-only for its own tags - this only saves the hand-off for handing the object over.
+     * @param baseName the name of the tag base (must already be registered, and normally already marked by {@link #markMainThreadOnly}).
+     */
+    public static void markBareBaseAsyncSafe(String baseName) {
+        TagBaseData base = baseTags.get(baseName);
+        if (base == null) {
+            Debug.echoError("Cannot mark tag base '" + baseName + "' as async-safe when bare: no such tag base is registered.");
+            return;
+        }
+        base.asyncSafeBare = true;
     }
 
     /**
@@ -200,9 +229,15 @@ public class TagManager {
         if (!baseHandler.mainThreadOnly) {
             return false;
         }
-        if (baseHandler.asyncSafeSubTags != null) {
+        if (baseHandler.asyncSafeSubTags != null || baseHandler.asyncSafeBare) {
             Attribute attribute = event.getAttributes();
-            if (attribute.attributes.length > 1 && baseHandler.asyncSafeSubTags.contains(attribute.attributes[1].key)) {
+            if (attribute.attributes.length > 1) {
+                if (baseHandler.asyncSafeSubTags != null && baseHandler.asyncSafeSubTags.contains(attribute.attributes[1].key)) {
+                    return false;
+                }
+            }
+            else if (baseHandler.asyncSafeBare && attribute.attributes.length == 1 && attribute.attributes[0].rawParam == null) {
+                // Eg "<player>" on its own, which hands back an object the context is already holding rather than looking anything up.
                 return false;
             }
         }

@@ -897,6 +897,16 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         return internal.waitfor && queue.holdingOn == this;
     }
 
+    /**
+     * Returns true if this entry was written with the given word as a plain unprefixed argument, eg "per_player".
+     * <p>
+     * Reads the raw script text, gathered when the entry was created, so this works before the arguments have been parsed.
+     * The name must be given in lowercase, and must be a word the script wrote literally - a tag that resolves to it won't match.
+     */
+    public boolean hasRawArgument(String argName) {
+        return internal.raw_input_args != null && internal.raw_input_args.contains(argName);
+    }
+
     public void setFinished(boolean finished) {
         if (!finished) {
             throw new RuntimeException("setFinished called weird");

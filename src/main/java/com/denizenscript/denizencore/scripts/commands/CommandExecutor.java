@@ -166,6 +166,10 @@ public class CommandExecutor {
         if (!command.asyncDeferrable || command.generatedExecutor != null) {
             return false;
         }
+        if (!command.isAsyncDeferrable(scriptEntry)) {
+            // The command itself says this particular line isn't one of the deferrable ones (eg a 'narrate' with 'per_player').
+            return false;
+        }
         if (scriptEntry.internal.waitfor) {
             // The script is explicitly waiting for this one, which is the opposite of firing it off.
             return false;

@@ -154,7 +154,16 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     //
     // Commands are marked internally as async-safe or not. Any command that is not async-safe is automatically handed to the main thread
     // and the async queue simply waits for it to complete - so scripts remain correct, they just don't gain any speed from those commands.
-    // Most queue/logic commands (define, if, foreach, while, repeat, choose, wait, ...) are async-safe.
+    // Most queue/logic commands (define, if, foreach, while, repeat, choose, wait, ...) are async-safe,
+    // as are the file and web commands (fileread, filewrite, filecopy, log, webget) - those touch nothing but files and the network,
+    // so an async queue runs them itself rather than making the main thread do the waiting.
+    //
+    // Some commands only send something out and never report anything back - narrate, actionbar, playsound, playeffect, animate, showfake, ...
+    // Those are handed to the main thread without the script waiting: their arguments, including all tags, are read on the script's own thread
+    // at the moment the script reaches the line, and only the sending itself is left for the main thread to do when it next gets a chance.
+    // The script carries on immediately, so a loop of them costs it nothing, and they still happen in the order the script wrote them.
+    // A line the script is waiting for anyway ('~', or a 'save:' or 'if:' argument) is never handed over this way,
+    // and neither is a narrate or actionbar using 'per_player', which has to parse its text once per target at the exact moment it sends.
     //
     // Note that most tags are safe to read from an async queue, but tags that read live server/world state may return slightly outdated data,
     // or in rare cases may error, as the main thread can be modifying that data at the same moment.
@@ -464,12 +473,15 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (queueNeedsToDebug()) {
             long totalMs = (System.nanoTime() - startTime) / 1000000;
             queueDebug("Completing queue '<QUEUE>' in <A>" + totalMs + "<O>ms.");
-            if (mainThreadWaitCount > 0) {
-                // The single most useful number for anyone using async: how much of the queue's life was spent not running.
+            // Repeated crossings are what's worth reporting. A single one is just the cost of reading one live value, which nearly every script does,
+            // so saying anything about it would put two extra lines under every '- async:' one-liner for no reason.
+            // Exact numbers are available whenever they're wanted, via <@link tag QueueTag.async_stats>.
+            if (mainThreadWaitCount > 1) {
                 long waitMs = mainThreadWaitNanos / 1000000;
+                long waitPercent = totalMs > 0 ? waitMs * 100 / totalMs : 0;
                 queueDebug("Queue '<QUEUE>' waited on the main thread <A>" + waitMs + "<O>ms across <A>" + mainThreadWaitCount + "<O> hand-off(s)"
-                        + (totalMs > 0 ? " - <A>" + (waitMs * 100 / totalMs) + "%<O> of its runtime" : "")
-                        + ". If that share is large, this script gains little from running off-thread.");
+                        + (totalMs > 0 ? " - <A>" + waitPercent + "%<O> of its runtime" : "")
+                        + (waitPercent >= 50 ? ". Most of this queue's life was spent waiting, so it gains little from running off-thread." : "."));
             }
         }
         if (callback != null) {

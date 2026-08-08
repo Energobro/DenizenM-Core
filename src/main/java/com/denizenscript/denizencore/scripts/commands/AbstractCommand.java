@@ -256,6 +256,16 @@ public abstract class AbstractCommand {
      */
     public boolean asyncDeferrable = false;
 
+    /**
+     * Whether this one entry may be handed off without waiting, for a command that is only deferrable some of the time.
+     * <p>
+     * Called before the entry's arguments are parsed, so it can only look at raw input - see {@link ScriptEntry#hasRawArgument}.
+     * The general rules of {@link #asyncDeferrable} still apply on top of whatever this returns.
+     */
+    public boolean isAsyncDeferrable(ScriptEntry scriptEntry) {
+        return asyncDeferrable;
+    }
+
     /** Marks this command as safe to run off the main thread. See {@link #asyncSafe}. */
     public void setAsyncSafe(boolean safe) {
         asyncSafe = safe;

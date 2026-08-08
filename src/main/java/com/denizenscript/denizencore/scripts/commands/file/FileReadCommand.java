@@ -20,6 +20,7 @@ public class FileReadCommand extends AbstractCommand implements Holdable {
         setSyntax("fileread [path:<path>]");
         setRequiredArguments(1, 1);
         isProcedural = false;
+        asyncSafe = true; // Only reads a file and saves the result onto its own entry - and without '~' the read is a blocking one, which is all the more reason to keep it off the main thread.
         autoCompile();
     }
 

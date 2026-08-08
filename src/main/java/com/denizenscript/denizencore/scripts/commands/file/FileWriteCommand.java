@@ -20,6 +20,7 @@ public class FileWriteCommand extends AbstractCommand implements Holdable {
         setSyntax("filewrite [path:<path>] [data:<binary>]");
         setRequiredArguments(2, 2);
         isProcedural = false;
+        asyncSafe = true; // Only writes a file - and without '~' the write is a blocking one, which is all the more reason to keep it off the main thread.
         autoCompile();
     }
 
