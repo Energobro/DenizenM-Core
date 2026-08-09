@@ -38,6 +38,17 @@ public class ObjectTagProcessor<T extends ObjectTag> {
      */
     public HashSet<String> mainThreadOnlyTags;
 
+    /**
+     * Whether the named tag has to be read on the main thread, per the two marking fields above.
+     * Only call this once the cheap checks in {@link #getObjectAttribute} have already passed - it does set lookups.
+     */
+    private boolean requiresMainThread(String tagName) {
+        if (mainThreadOnly) {
+            return asyncSafeSubTags == null || !asyncSafeSubTags.contains(tagName);
+        }
+        return mainThreadOnlyTags.contains(tagName);
+    }
+
     public static class TagData<T extends ObjectTag, R extends ObjectTag> {
 
         public String name;
@@ -174,10 +185,9 @@ public class ObjectTagProcessor<T extends ObjectTag> {
             return object;
         }
         Attribute.AttributeComponent nextComponent = attribute.attributes[attribute.fulfilled];
-        boolean needsMainThread = mainThreadOnly
-                ? asyncSafeSubTags == null || !asyncSafeSubTags.contains(nextComponent.key)
-                : mainThreadOnlyTags != null && mainThreadOnlyTags.contains(nextComponent.key);
-        if (needsMainThread && !DenizenCore.isMainThread()) {
+        // Order matters here - this runs for every sub-tag of every object tag in every script. The two field checks are what let an
+        // unmarked type, and anything at all on the main thread, skip the set lookups entirely. Same shape as TagManager.fireEvent.
+        if ((mainThreadOnly || mainThreadOnlyTags != null) && !DenizenCore.isMainThread() && requiresMainThread(nextComponent.key)) {
             // This object reads live server state, so an async script can't read it directly.
             // The whole remaining tag runs on the main thread in one hand-off - the recursive call below sees the main thread and proceeds normally.
             Debug.verboseLog("Tag '" + nextComponent.key + "' on a main-thread-only object, handing it over from thread '" + Thread.currentThread().getName() + "'.");
