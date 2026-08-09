@@ -15,26 +15,32 @@ import com.denizenscript.denizencore.utilities.text.StringHolder;
 import java.io.File;
 import java.lang.reflect.Method;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class NoteManager {
 
-    public static HashMap<String, Notable> nameToObject = new HashMap<>();
-    public static HashMap<Notable, String> objectToName = new HashMap<>();
-    public static HashMap<Class, HashSet<Notable>> notesByType = new HashMap<>();
+    /**
+     * Note storage. Concurrent because these are read from async script threads: every notable type's {@code valueOf} does a note lookup
+     * before parsing its input, and {@code refreshState} does one on any note that has been forgotten - both of which an async script
+     * reaches through tags that are otherwise safe to read off the main thread. Notes are written rarely (the note command, and load)
+     * and read constantly, so the only cost is losing HashMap's tolerance of null keys, handled by the guards below.
+     */
+    public static Map<String, Notable> nameToObject = new ConcurrentHashMap<>();
+    public static Map<Notable, String> objectToName = new ConcurrentHashMap<>();
+    public static Map<Class, Set<Notable>> notesByType = new ConcurrentHashMap<>();
 
     public static boolean isSaved(Notable object) {
-        return objectToName.containsKey(object);
+        return object != null && objectToName.containsKey(object);
     }
 
     public static Notable getSavedObject(String id) {
-        return nameToObject.get(CoreUtilities.toLowerCase(id));
+        return id == null ? null : nameToObject.get(CoreUtilities.toLowerCase(id));
     }
 
     public static String getSavedId(Notable object) {
-        return objectToName.get(object);
+        return object == null ? null : objectToName.get(object);
     }
 
     public static void saveAs(Notable object, String id) {
@@ -65,7 +71,10 @@ public class NoteManager {
 
     public static void remove(Notable obj) {
         String id = objectToName.get(obj);
-        nameToObject.remove(id);
+        // A note that was never saved has no id - and unlike HashMap, the concurrent map these live in rejects a null key outright.
+        if (id != null) {
+            nameToObject.remove(id);
+        }
         objectToName.remove(obj);
         notesByType.get(obj.getClass()).remove(obj);
     }
@@ -205,7 +214,9 @@ public class NoteManager {
                 String note = method.getAnnotation(Note.class).value();
                 typesToNames.put(notable, note);
                 namesToTypes.put(note, notable);
-                notesByType.put(notable, new HashSet<>());
+                // Concurrent for the same reason as the maps above: 'server.notables' and the tab completers walk these sets,
+                // and the note command adds to them while that happens.
+                notesByType.put(notable, ConcurrentHashMap.newKeySet());
             }
         }
     }
