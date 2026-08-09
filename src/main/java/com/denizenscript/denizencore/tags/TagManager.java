@@ -5,6 +5,7 @@ import com.denizenscript.denizencore.objects.*;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.tags.core.*;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.AsciiMatcher;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
@@ -224,6 +225,23 @@ public class TagManager {
         }
     }
 
+    /**
+     * Marks individual tags on an object type as main-thread-only, leaving the rest of the type readable off-thread.
+     * <p>
+     * The inverse of {@link #markObjectTypeMainThreadOnly}, and for the opposite kind of type: one that is a plain value carrying no live
+     * server object of its own (a material, say), but that still has the odd tag which goes and reads live state.
+     * @param type the object type class (must already be registered with the ObjectFetcher).
+     * @param tagNames names of the tags that need the main thread.
+     */
+    public static void markObjectTypeTagsMainThreadOnly(Class<? extends ObjectTag> type, String... tagNames) {
+        ObjectType<? extends ObjectTag> objectType = ObjectFetcher.getType(type);
+        if (objectType == null || objectType.tagProcessor == null) {
+            Debug.echoError("Cannot mark tags on object type '" + DebugInternals.getClassNameOpti(type) + "' as main-thread-only: it isn't registered (or has no tag processor).");
+            return;
+        }
+        objectType.tagProcessor.mainThreadOnlyTags = new HashSet<>(Arrays.asList(tagNames));
+    }
+
     /** Returns true if this tag must be moved to the main thread before being read by the current (non-main) thread. */
     public static boolean requiresMainThread(TagBaseData baseHandler, ReplaceableTagEvent event) {
         if (!baseHandler.mainThreadOnly) {
@@ -261,7 +279,7 @@ public class TagManager {
                 Debug.echoError(ex);
             }
             finally {
-                com.denizenscript.denizencore.scripts.queues.ScriptQueue.recordMainThreadWait(null, System.nanoTime() - waitStart);
+                ScriptQueue.recordMainThreadWait(null, System.nanoTime() - waitStart);
             }
             return;
         }

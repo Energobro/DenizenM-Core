@@ -6,6 +6,7 @@ import com.denizenscript.denizencore.objects.ObjectFetcher;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.ObjectType;
 import com.denizenscript.denizencore.objects.properties.PropertyParser;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.codegen.TagNamer;
@@ -14,6 +15,7 @@ import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 
 public class ObjectTagProcessor<T extends ObjectTag> {
@@ -28,7 +30,13 @@ public class ObjectTagProcessor<T extends ObjectTag> {
     public boolean mainThreadOnly;
 
     /** Sub-tags of a main-thread-only type that are safe to read off-thread anyway (eg flag data), by name. Null means "none". */
-    public java.util.HashSet<String> asyncSafeSubTags;
+    public HashSet<String> asyncSafeSubTags;
+
+    /**
+     * Tags that must be read on the main thread even though the type itself is safe off it, by name. Null means none.
+     * The inverse of {@link #asyncSafeSubTags}: for a type that is a plain value, but has a few tags that go and fetch live state anyway.
+     */
+    public HashSet<String> mainThreadOnlyTags;
 
     public static class TagData<T extends ObjectTag, R extends ObjectTag> {
 
@@ -166,7 +174,10 @@ public class ObjectTagProcessor<T extends ObjectTag> {
             return object;
         }
         Attribute.AttributeComponent nextComponent = attribute.attributes[attribute.fulfilled];
-        if (mainThreadOnly && !DenizenCore.isMainThread() && (asyncSafeSubTags == null || !asyncSafeSubTags.contains(nextComponent.key))) {
+        boolean needsMainThread = mainThreadOnly
+                ? asyncSafeSubTags == null || !asyncSafeSubTags.contains(nextComponent.key)
+                : mainThreadOnlyTags != null && mainThreadOnlyTags.contains(nextComponent.key);
+        if (needsMainThread && !DenizenCore.isMainThread()) {
             // This object reads live server state, so an async script can't read it directly.
             // The whole remaining tag runs on the main thread in one hand-off - the recursive call below sees the main thread and proceeds normally.
             Debug.verboseLog("Tag '" + nextComponent.key + "' on a main-thread-only object, handing it over from thread '" + Thread.currentThread().getName() + "'.");
@@ -181,7 +192,7 @@ public class ObjectTagProcessor<T extends ObjectTag> {
                 return null;
             }
             finally {
-                com.denizenscript.denizencore.scripts.queues.ScriptQueue.recordMainThreadWait(null, System.nanoTime() - waitStart);
+                ScriptQueue.recordMainThreadWait(null, System.nanoTime() - waitStart);
             }
             return result[0];
         }

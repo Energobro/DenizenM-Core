@@ -6,6 +6,7 @@ import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -203,7 +204,7 @@ public class AsyncQueue extends TimedQueue {
 
     /** Asks every running async queue to stop, and waits (briefly) for their workers to finish. Used on shutdown. */
     public static void stopAll() {
-        Collection<AsyncQueue> queues = new java.util.ArrayList<>(runningQueues);
+        Collection<AsyncQueue> queues = new ArrayList<>(runningQueues);
         if (queues.isEmpty()) {
             return;
         }
