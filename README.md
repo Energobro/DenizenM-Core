@@ -48,15 +48,19 @@ A block whose contents turn out to be trivial measures itself and simply runs on
 
 ### Safe off the main thread
 
-**Commands** - queue and logic: `define`, `definemap`, `if`, `else`, `choose`, `foreach`, `while`, `repeat`, `goto`, `mark`, `inject`, `random`, `wait`, `waituntil`, `stop`, `determine`, `debug`, `async`. Files and network: `fileread`, `filewrite`, `filecopy`, `log`, `webget` - these touch nothing but disk and sockets, and without `~` they would otherwise block the main thread on I/O.
+**Commands** - queue and logic: `define`, `definemap`, `if`, `else`, `choose`, `foreach`, `while`, `repeat`, `goto`, `mark`, `inject`, `random`, `wait`, `waituntil`, `stop`, `determine`, `debug`, `async`. Files and network: `fileread`, `filewrite`, `filecopy`, `log`, `webget`, `yaml` - these touch nothing but disk and sockets, and without `~` they would otherwise block the main thread on I/O.
 
-**Tags** - anything that processes data rather than reading the server: elements, math, lists, maps, durations, text, `<util...>`, `<queue...>`, `<script...>`, definitions. Implementations may also exempt specific live-object tags that only read fields already stored on the object.
+**Tags** - anything that processes data rather than reading the server: elements, math, lists, maps, durations, text, `<util...>`, `<queue...>`, `<script...>`, definitions. Implementations may also exempt specific live-object tags that only read fields already stored on the object, or a whole object type where nothing it holds is live.
+
+In Denizen that currently covers, among others: a location's arithmetic and its whole `<location[...]>` base; the geometry of cuboids, ellipsoids and polygons, and flags on any noted one; every tag on a biome; a material, an enchantment, a trade; and on a player, `uuid`, `name`, `is_online`, op/whitelist/ban status, first- and last-played times, and chat history.
 
 A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back an object the queue is already holding. Only reading *from* that object goes to the main thread.
 
 ### Not safe (handed to the main thread, script waits)
 
-**Commands** - anything that changes or reads the live server: `flag`, `adjust`, `note`, `run`, `runlater`, `queue`, `ratelimit`, `yaml`, `sql`, `redis`, `mongo`, `reload`, plus every world-touching command an implementation adds (teleport, spawn, give, ...).
+**Commands** - anything that changes or reads the live server: `flag`, `adjust`, `note`, `run`, `runlater`, `queue`, `ratelimit`, `sql`, `redis`, `mongo`, `reload`, plus every world-touching command an implementation adds (teleport, spawn, give, ...).
+
+The three database commands are listed here for now because they have not been tested off-thread, not because anything was found wrong with them - their own I/O already runs on a separate thread either way, so `~sql`, `~redis` and `~mongo` do not block the main thread regardless.
 
 **Tags** - anything reading live server, world, entity, player or plugin state. These are marked by the implementation and handed over automatically; you never get a wrong answer, you get a slow one.
 
