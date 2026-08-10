@@ -22,6 +22,7 @@ import org.bson.*;
 import org.bson.types.ObjectId;
 
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class MongoCommand extends AbstractCommand implements Holdable {
 
@@ -141,7 +142,8 @@ public class MongoCommand extends AbstractCommand implements Holdable {
     // - ~mongo id:name use_collection:my_new_collection
     // -->
 
-    public static Map<String, Connection> mongoConnections = new HashMap<>();
+    /** The open Mongo connections, by id. Concurrent for the same reason as {@link SQLCommand#connections} - see it. */
+    public static Map<String, Connection> mongoConnections = new ConcurrentHashMap<>();
 
     public static class Connection {
         public MongoClient connection;

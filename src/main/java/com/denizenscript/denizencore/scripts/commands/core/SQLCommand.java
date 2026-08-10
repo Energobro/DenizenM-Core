@@ -20,6 +20,7 @@ import com.denizenscript.denizencore.tags.core.EscapeTagUtil;
 import java.io.File;
 import java.sql.*;
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.Properties;
 
@@ -106,7 +107,12 @@ public class SQLCommand extends AbstractCommand implements Holdable {
     // - sql disconnect id:name
     // -->
 
-    public static Map<String, Connection> connections = new HashMap<>();
+    /**
+     * The open SQL connections, by id.
+     * Concurrent, because "&lt;util.sql_connections&gt;" iterates this from whatever thread reads the tag - the 'util' tag base is not
+     * main-thread-only - while connecting and disconnecting write to it. Iterating a plain HashMap through a write is exactly what breaks.
+     */
+    public static Map<String, Connection> connections = new ConcurrentHashMap<>();
 
     @Override
     public void onDisable() {

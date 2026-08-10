@@ -16,14 +16,18 @@ import redis.clients.jedis.util.SafeEncoder;
 
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class RedisHelper {
 
-    public static Map<String, Jedis> connections = new HashMap<>();
-    public static Map<String, JedisPubSub> subscriptions = new HashMap<>();
+    /** The open Redis connections, by id. Concurrent for the same reason as {@link com.denizenscript.denizencore.scripts.commands.core.SQLCommand#connections} - see it. */
+    public static Map<String, Jedis> connections = new ConcurrentHashMap<>();
+
+    /** The active pub/sub subscriptions, by id. Written from the subscriber threads as well as the main one. */
+    public static Map<String, JedisPubSub> subscriptions = new ConcurrentHashMap<>();
 
     public static AtomicBoolean isEnabled = new AtomicBoolean(true);
 
