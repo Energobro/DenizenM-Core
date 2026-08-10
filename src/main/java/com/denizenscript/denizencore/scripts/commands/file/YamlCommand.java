@@ -29,6 +29,7 @@ import java.io.*;
 import java.net.URLDecoder;
 import java.nio.charset.Charset;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class YamlCommand extends AbstractCommand implements Holdable {
 
@@ -39,6 +40,11 @@ public class YamlCommand extends AbstractCommand implements Holdable {
         TagManager.registerTagHandler(ObjectTag.class, "yaml", this::yamlTagProcess);
         isProcedural = false;
         allowedDynamicPrefixes = true;
+        // Reads and writes files, and edits its own document map, which is concurrent. Nothing here touches the server,
+        // so an async queue can run it on its own thread instead of handing it over.
+        // Note this is deliberately not setAsyncWaitable: that would move '~' handling into the executor, and the command keeps
+        // doing its own - which is what leaves behaviour on non-async queues exactly as it was.
+        asyncSafe = true;
     }
 
     // <--[command]
@@ -132,7 +138,13 @@ public class YamlCommand extends AbstractCommand implements Holdable {
     // - yaml id:myfile copykey:my.first.key my.new.key to_id:myotherfile
     // -->
 
-    public Map<String, YamlConfiguration> yamlDocuments = new HashMap<>();
+    /**
+     * The loaded YAML documents, by id.
+     * Concurrent, because "&lt;yaml[...]&gt;" and "&lt;util.yaml_documents&gt;" are readable from an async queue's thread
+     * (the 'yaml' tag base reads plain saved data, so it is not main-thread-only) while the yaml command loads and unloads here.
+     * Note the tag side iterates the key set, which a plain HashMap cannot survive being written to during.
+     */
+    public Map<String, YamlConfiguration> yamlDocuments = new ConcurrentHashMap<>();
 
     private YamlConfiguration getYaml(String id) {
         if (id == null) {
@@ -294,7 +306,10 @@ public class YamlCommand extends AbstractCommand implements Holdable {
                         if (runnableConfigs[0] == null) {
                             runnableConfigs[0] = new YamlConfiguration();
                         }
-                        DenizenCore.runOnMainThread(onLoadCompleted);
+                        // Finished right here rather than by handing back to the main thread. That hand-off existed only because the
+                        // document map could not be written to from another thread; it is concurrent now. 'savefile' below already
+                        // finishes from its own thread, and so does the fileread command - this brings 'load' in line with both.
+                        onLoadCompleted.run();
                     }
                     catch (Exception e) {
                         Debug.echoError("Failed to load yaml file: " + e);
@@ -310,6 +325,11 @@ public class YamlCommand extends AbstractCommand implements Holdable {
             case LOADTEXT:
                 String str = rawText.asString();
                 YamlConfiguration config = YamlConfiguration.load(str);
+                if (config == null) {
+                    // Text that parses to nothing (empty, or not valid yaml) gives null here. The LOAD case above has always guarded this;
+                    // this one did not, and quietly stored the null - which the document map can no longer hold now that it is concurrent.
+                    config = new YamlConfiguration();
+                }
                 yamlDocuments.remove(id);
                 yamlDocuments.put(id, config);
                 scriptEntry.setFinished(true);
@@ -796,7 +816,9 @@ public class YamlCommand extends AbstractCommand implements Holdable {
 
             }
             else {
-                return new ListTag(keys, stringHolder -> new ElementTag(stringHolder.str, true));
+                // Nulls filtered out: a document loaded from a bare scalar rather than a key/value tree keeps that scalar under a null
+                // key (see YamlConfiguration.loadRaw), and a null key has no name to report - reading '.str' off it threw instead.
+                return new ListTag(keys, Objects::nonNull, stringHolder -> new ElementTag(stringHolder.str, true));
             }
         }
 
@@ -825,7 +847,9 @@ public class YamlCommand extends AbstractCommand implements Holdable {
 
             }
             else {
-                return new ListTag(keys, stringHolder -> new ElementTag(stringHolder.str, true));
+                // Nulls filtered out: a document loaded from a bare scalar rather than a key/value tree keeps that scalar under a null
+                // key (see YamlConfiguration.loadRaw), and a null key has no name to report - reading '.str' off it threw instead.
+                return new ListTag(keys, Objects::nonNull, stringHolder -> new ElementTag(stringHolder.str, true));
             }
         }
 

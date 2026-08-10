@@ -221,6 +221,11 @@ public class YamlConfiguration {
     private Set<StringHolder> getKeysDeep(Map<StringHolder, Object> objs, String base) {
         Set<StringHolder> strings = new LinkedHashSet<>();
         for (Map.Entry<StringHolder, Object> obj : objs.entrySet()) {
+            if (obj.getKey() == null) {
+                // A document loaded from a bare scalar rather than a key/value tree keeps that scalar under a null key (see loadRaw).
+                // It has no name, so it has no deep key either - and concatenating it into one produced the literal text "null" as a key.
+                continue;
+            }
             strings.add(new StringHolder(base + obj.getKey()));
             if (obj.getValue() instanceof Map) {
                 strings.addAll(getKeysDeep((Map<StringHolder, Object>) obj.getValue(), base + obj.getKey() + "."));
