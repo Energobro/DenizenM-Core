@@ -25,6 +25,20 @@ public class Warning { // Note: can be called async
         warn(context == null ? null : context.entry);
     }
 
+    /**
+     * Warns with a one-off message in place of this warning's usual one, for a warning that wants to name what triggered it.
+     * <p>
+     * Prefer this over assigning to {@link #message} and then warning: that leaves the detail of one warning in place for the next,
+     * and warnings can be raised from several threads at once (async queues and '~' commands), which can cross two of them over.
+     */
+    public void warnWith(TagContext context, String specificMessage) {
+        Deprecations.firedRecently.put(id, true);
+        if (!testShouldWarn()) {
+            return;
+        }
+        Debug.echoError(context == null ? null : context.entry, specificMessage);
+    }
+
     public void warn(ScriptEntry entry) {
         Deprecations.firedRecently.put(id, true);
         if (!testShouldWarn()) {
