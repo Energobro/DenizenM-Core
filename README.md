@@ -42,6 +42,9 @@ The win therefore comes from having *fewer* crossings, never from cheaper ones. 
 # Background work that the script does not wait for.
 - async detached copy_defs:path|index:
     - define point <[path].get[<[index]>].parsed>
+
+# A scheduled run, on its own thread when the time comes. Survives a restart.
+- runlater nightly_report delay:1h async
 ```
 
 A block whose contents turn out to be trivial measures itself and simply runs on the main thread from then on, skipping the hand-off entirely - so a block that wasn't worth writing costs nothing for having been written.
@@ -49,6 +52,12 @@ A block whose contents turn out to be trivial measures itself and simply runs on
 ### Safe off the main thread
 
 **Commands** - queue and logic: `define`, `definemap`, `if`, `else`, `choose`, `foreach`, `while`, `repeat`, `goto`, `mark`, `inject`, `random`, `wait`, `waituntil`, `stop`, `determine`, `debug`, `async`. Files and network: `fileread`, `filewrite`, `filecopy`, `log`, `webget`, `yaml` - these touch nothing but disk and sockets, and without `~` they would otherwise block the main thread on I/O.
+
+Databases: `sql`, `redis` - a socket to another server and their own connection lists, with no Minecraft server state in the path. One connection is still not thread-safe in itself, so two scripts working one id at the same time is the script writer's problem, exactly as it already was for two `~sql` lines.
+
+Images: `image`, `draw` - pixel work and image files, with no server state anywhere in them. Building or resizing an image is exactly the kind of CPU work that has no business on the main thread.
+
+`run` is safe when the line says `async`, since it then only starts a thread. A plain `run` still goes to the main thread, and the script it starts runs there: being called from an async script never makes a script async by itself.
 
 **Tags** - anything that processes data rather than reading the server: elements, math, lists, maps, durations, text, `<util...>`, `<queue...>`, `<script...>`, definitions. Implementations may also exempt specific live-object tags that only read fields already stored on the object, or a whole object type where nothing it holds is live.
 
@@ -58,9 +67,9 @@ A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back
 
 ### Not safe (handed to the main thread, script waits)
 
-**Commands** - anything that changes or reads the live server: `flag`, `adjust`, `note`, `run`, `runlater`, `queue`, `ratelimit`, `sql`, `redis`, `mongo`, `reload`, plus every world-touching command an implementation adds (teleport, spawn, give, ...).
+**Commands** - anything that changes or reads the live server: `flag`, `adjust`, `note`, `run` (without `async`), `runlater`, `queue`, `ratelimit`, `mongo`, `reload`, plus every world-touching command an implementation adds (teleport, spawn, give, ...).
 
-The three database commands are listed here for now because they have not been tested off-thread, not because anything was found wrong with them - their own I/O already runs on a separate thread either way, so `~sql`, `~redis` and `~mongo` do not block the main thread regardless.
+`mongo` is listed here because it has not been tested off-thread, not because anything was found wrong with it - its own I/O already runs on a separate thread either way, so `~mongo` does not block the main thread regardless. `sql` and `redis` are built the same way and have since been marked safe: their threading has been measured off-thread (no hand-offs, and a failed connect releases its queue from the worker rather than hanging it), while the round trip of real query results is still waiting on a test against a live database.
 
 **Tags** - anything reading live server, world, entity, player or plugin state. These are marked by the implementation and handed over automatically; you never get a wrong answer, you get a slow one.
 
@@ -68,7 +77,9 @@ The three database commands are listed here for now because they have not been t
 
 Some commands only send something out and never report anything back. Those are handed over *without* the script waiting: their arguments, including all tags, are read on the script's own thread at the moment the script reaches the line, and only the sending is left for the main thread. The script carries on immediately, and deferred commands keep the order the script wrote them in.
 
-Implementations mark these; in Denizen they include `narrate`, `actionbar`, `playsound`, `playeffect`, `animate` and `showfake`.
+Implementations mark these; in Denizen they are `narrate`, `actionbar`, `announce`, `playsound`, `playeffect`, `showfake`, `debugblock`, `toast`, `compass`, `fakeequip` and `sidebar`.
+
+A command that builds its arguments and its execution into one generated step (`autoCompile`) cannot be handed over this way, since there is nothing left to split - that is what rules out `title`, `chat`, `blockcrack` and `tablist`.
 
 A line is **not** handed over this way if the script is waiting for it anyway - `~`, a `save:` argument, or an `if:` argument - or if the command says this particular line can't be (for example `narrate ... per_player`, which has to parse its text once per target at the exact moment it sends).
 
