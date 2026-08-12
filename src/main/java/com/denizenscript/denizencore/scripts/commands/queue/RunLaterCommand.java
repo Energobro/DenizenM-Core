@@ -108,7 +108,8 @@ public class RunLaterCommand extends AbstractCommand {
                 scriptEntry.addObject("delay", arg.asType(DurationTag.class));
             }
             // Checked ahead of the script name, so a script actually named "async" can't swallow the flag.
-            else if (arg.matches("async")) {
+            // The prefix check is what stops the reverse: 'matches' compares only the value, so without it "def.x:async" would be eaten as this flag.
+            else if (!arg.hasPrefix() && arg.matches("async")) {
                 scriptEntry.addObject("async", new ElementTag(true));
             }
             else if (arg.hasPrefix()

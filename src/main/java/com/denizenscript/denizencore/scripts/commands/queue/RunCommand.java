@@ -136,10 +136,12 @@ public class RunCommand extends AbstractCommand implements Holdable {
                     && arg.matchesArgumentType(MapTag.class)) {
                 defMap.putAll(arg.asType(MapTag.class));
             }
-            else if (arg.matches("instant", "instantly")) {
+            // The prefix checks matter here: 'matches' compares only the value, so without them "def.x:async" or "def.x:instant"
+            // would be read as these flags and the definition would be lost with no error at all.
+            else if (!arg.hasPrefix() && arg.matches("instant", "instantly")) {
                 scriptEntry.addObject("instant", new ElementTag(true));
             }
-            else if (arg.matches("async")) {
+            else if (!arg.hasPrefix() && arg.matches("async")) {
                 scriptEntry.addObject("async", new ElementTag(true));
             }
             else if (arg.matchesPrefix("delay")
