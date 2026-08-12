@@ -866,6 +866,19 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
         });
 
         // <--[tag]
+        // @attribute <util.current_time_nanos>
+        // @returns ElementTag(Number)
+        // @description
+        // Returns a monotonic time reading in nanoseconds, for measuring how long something took.
+        // Only differences between two readings mean anything - the number itself is counted from an arbitrary point, not from any date.
+        // Use <@link tag util.current_time_millis> for anything coarser, and <@link tag util.time_now> if you need stable time.
+        // Nanosecond resolution is what makes this readable for things a millisecond can't see, such as how long an async script takes to start.
+        // -->
+        tagProcessor.registerTag(ElementTag.class, "current_time_nanos", (attribute, object) -> {
+            return new ElementTag(System.nanoTime());
+        });
+
+        // <--[tag]
         // @attribute <util.notes[<type>]>
         // @returns ListTag
         // @description
