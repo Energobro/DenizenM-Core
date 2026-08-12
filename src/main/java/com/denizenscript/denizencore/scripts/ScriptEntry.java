@@ -912,6 +912,24 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         return internal.raw_input_args != null && internal.raw_input_args.contains(argName);
     }
 
+    /**
+     * Returns true if this entry was written with the given prefix, eg the "to_permission" of "to_permission:my.node".
+     * <p>
+     * The same idea as {@link #hasRawArgument}, but for the prefixed form, which that one never sees - it only gathers arguments written without a prefix.
+     * Reads the raw script text, so this works before the arguments have been parsed. The name must be given in lowercase, and must be a prefix the script wrote literally.
+     */
+    public boolean hasRawArgumentPrefix(String prefixName) {
+        if (internal.all_arguments == null) {
+            return false;
+        }
+        for (InternalArgument arg : internal.all_arguments) {
+            if (arg != null && arg.prefix != null && prefixName.equals(CoreUtilities.toLowerCase(arg.prefix.fullOriginalRawValue))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public void setFinished(boolean finished) {
         if (!finished) {
             throw new RuntimeException("setFinished called weird");
