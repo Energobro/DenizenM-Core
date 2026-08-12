@@ -161,9 +161,16 @@ Scripts:
         Allow: true                    # false makes every async request run on the main thread instead
         Main thread wait timeout: 15s  # how long an async script waits for the main thread before erroring
         Shutdown timeout: 3s           # how long shutdown waits for async queues to finish
+        Main thread task budget ms: 5  # per tick, for work handed over without waiting; 0 for no budget
+        Warn at queue count: 50        # warn once when this many async queues are live; 0 to never warn
+        Max queue count: 256           # past this, a new async queue runs on the main thread instead; 0 for no limit
 ```
 
-Each async queue owns a thread for its whole life, including while it sits in a `wait`. Starting them in a loop quietly turns into that many threads; the engine warns once when a lot are live at the same time. Prefer one queue that processes a list.
+Each async queue owns a thread for its whole life, including while it sits in a `wait`. Starting them in a loop quietly turns into that many threads; the engine warns once when a lot are live at the same time, and past the maximum a new one simply runs on the main thread rather than adding another thread. Prefer one queue that processes a list.
+
+Work an async script hands over *without* waiting - deferred commands, debug output - is budgeted per tick, because a script can produce it faster than the main thread can run it. The script never waits on any of it, so the budget costs it nothing; it only spreads the delivery. Requests a script is actually waiting on are never budgeted, and are always run ahead of the rest.
+
+**One thing off-thread scripts do not get:** reading another queue's definitions - `<queue[some_id].definition[x]>` - while that queue is running off-thread has no guarantees. Definitions are an ordinary ordered map, and making it otherwise would cost every definition read in every script to protect an unusual one. Read your own definitions freely; to get a value out of a queue you don't own, have it write a flag or use `- async:`'s own definition merging.
 
 ### Licensing pre-note:
 

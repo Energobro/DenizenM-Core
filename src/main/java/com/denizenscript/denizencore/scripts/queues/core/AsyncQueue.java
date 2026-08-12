@@ -96,11 +96,26 @@ public class AsyncQueue extends TimedQueue {
             super.onStart();
             return;
         }
+        int limit = CoreConfiguration.asyncQueueCountLimit;
+        if (limit > 0 && runningQueues.size() >= limit) {
+            // Running it on the main thread rather than refusing it: the script still does what it says, it just stops adding threads.
+            // A server that reaches this is already in trouble - this only keeps a runaway loop from making it worse.
+            if (!warnedOnLimit) {
+                warnedOnLimit = true;
+                Debug.echoError(limit + " async script queues are already running, which is the configured limit, so queue '" + debugId
+                        + "' is running on the main thread instead. Something is starting async queues in a loop - consider one queue that processes a list.");
+            }
+            super.onStart();
+            return;
+        }
         DenizenCore.runAsync(this::runLoop);
     }
 
     /** Whether the count warning has already been given, so that a busy server gets it once rather than on every queue it starts. */
     private static volatile boolean warnedOnCount = false;
+
+    /** The same, for the hard limit. Re-armed by {@link #checkQueueCount()} once the count has fallen well back. */
+    private static volatile boolean warnedOnLimit = false;
 
     /** The worker loop. Runs on the async thread for the entire life of the queue. */
     public void runLoop() {
@@ -159,6 +174,10 @@ public class AsyncQueue extends TimedQueue {
         }
         else if (warnedOnCount && count < threshold / 2) {
             warnedOnCount = false;
+        }
+        int limit = CoreConfiguration.asyncQueueCountLimit;
+        if (warnedOnLimit && limit > 0 && count < limit / 2) {
+            warnedOnLimit = false;
         }
     }
 

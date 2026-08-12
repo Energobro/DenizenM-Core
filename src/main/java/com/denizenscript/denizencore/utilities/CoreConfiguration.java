@@ -57,13 +57,33 @@ public class CoreConfiguration {
     public static long asyncShutdownTimeoutMillis = 3000;
 
     /**
+     * How long (in milliseconds) of each tick the main thread will spend on fire-and-forget work handed to it by async threads -
+     * deferred commands, debug output, and the like. Anything left over waits for the next tick, keeping its order.
+     * <p>
+     * This is what stops an async script from flooding the main thread faster than it can drain: the script never waits on this
+     * work, so delaying it costs the script nothing. Requests that a thread is actually blocked on are not budgeted and always run in full.
+     * <p>
+     * Set to 0 to run everything every tick, however much of it there is.
+     */
+    public static long mainThreadTaskBudgetMillis = 5;
+
+    /**
      * Warn once when this many async queues are running at the same time. Set to 0 to never warn.
      * <p>
      * Each async queue owns a thread for its whole life, including while it sits in a 'wait', so a script that starts them in bulk
-     * quietly turns into that many threads. There is no cap on purpose - capping would leave a new queue unable to start at all -
-     * so this is the only warning a server gets before the thread count becomes a problem.
+     * quietly turns into that many threads. This is the early word about it; {@link #asyncQueueCountLimit} is the backstop.
      */
     public static int asyncQueueCountWarning = 50;
+
+    /**
+     * Never run more than this many async queues at once. Set to 0 for no limit.
+     * <p>
+     * A queue that would exceed it runs on the main thread instead, rather than not running - a script that hits this is already
+     * misbehaving, and the point is only to stop a runaway loop from turning into unbounded threads, not to break the script.
+     * <p>
+     * Deliberately far above anything a healthy server reaches, so that it never costs speed in normal use: it is a backstop, not a throttle.
+     */
+    public static int asyncQueueCountLimit = 256;
 
     /**
      * An <@link command async> block whose contents have never taken longer than this (in nanoseconds) runs on the main thread instead of a worker.

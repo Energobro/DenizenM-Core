@@ -34,6 +34,7 @@ import java.util.Properties;
 import java.util.concurrent.ConcurrentLinkedQueue;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * The entry point of the core Denizen engine.
@@ -113,8 +114,23 @@ public class DenizenCore {
     /**
      * Tasks submitted from other threads that must run on the main thread, processed at the start of every tick.
      * Prefer {@link #runOnMainThread(Runnable)} over touching this directly.
+     * <p>
+     * Fire-and-forget work only - nothing is standing still waiting for anything in here, which is why it is processed under a
+     * time budget (see {@link CoreConfiguration#mainThreadTaskBudgetMillis}) with the remainder left for the next tick.
+     * Without that, an async script can produce deferred commands and debug output faster than the main thread can run them,
+     * and freeze the server with them - the one thing running off-thread is supposed to prevent.
+     * Work that a thread is blocked on goes to {@link #mainThreadWaitingTasks} instead.
      */
     public static final ConcurrentLinkedQueue<Runnable> mainThreadTasks = new ConcurrentLinkedQueue<>();
+
+    /**
+     * Tasks from {@link #runOnMainThreadAndWait(Runnable)}, where a thread is standing still until they are done.
+     * <p>
+     * Always processed in full, and ahead of {@link #mainThreadTasks}: there can never be more of these at once than there are
+     * live async threads, and leaving them behind a backlog of logging and deferred commands would mean async scripts waiting
+     * on work that nobody is waiting on.
+     */
+    public static final ConcurrentLinkedQueue<Runnable> mainThreadWaitingTasks = new ConcurrentLinkedQueue<>();
 
     /**
      * Timed queues that were started from a different thread, and so need to be added to {@link #timedQueues} by the main thread.
@@ -188,7 +204,8 @@ public class DenizenCore {
     public static void shutdown() {
         ShutdownScriptEvent.instance.fire();
         AsyncQueue.stopAll();
-        runMainThreadTasks();
+        // No budget here - there is no next tick to leave the remainder for, and dropping it would lose the last of the deferred work and debug output.
+        runMainThreadTasks(0);
         saveAll(true);
         logInterceptor.standardOutput();
         commandRegistry.disableCoreMembers();
@@ -303,7 +320,14 @@ public class DenizenCore {
         }
         CountDownLatch latch = new CountDownLatch(1);
         Throwable[] error = new Throwable[1];
-        mainThreadTasks.add(() -> {
+        // Exactly one of the two threads gets to own this task: the main thread runs it, or this one gives up on it, never both.
+        // Without the claim, a timed-out wait would leave the task sitting in the queue to run later - while this thread has already
+        // moved on to the next command, leaving the main thread and this one working the same script entry at once.
+        AtomicBoolean claimed = new AtomicBoolean(false);
+        mainThreadWaitingTasks.add(() -> {
+            if (!claimed.compareAndSet(false, true)) {
+                return;
+            }
             try {
                 run.run();
             }
@@ -316,7 +340,13 @@ public class DenizenCore {
         });
         try {
             if (!latch.await(CoreConfiguration.mainThreadWaitTimeoutMillis, TimeUnit.MILLISECONDS)) {
-                throw new RuntimeException("Timed out after " + CoreConfiguration.mainThreadWaitTimeoutMillis + "ms waiting for the main thread to process an async request - is the server frozen, or was Denizen shut down?");
+                if (claimed.compareAndSet(false, true)) {
+                    throw new RuntimeException("Timed out after " + CoreConfiguration.mainThreadWaitTimeoutMillis + "ms waiting for the main thread to process an async request - is the server frozen, or was Denizen shut down?");
+                }
+                // The main thread had already started it. Walking away now would be the very thing the claim is here to prevent,
+                // so wait it out - a task that never finishes means the server is gone anyway, and this at least says so.
+                Debug.echoError("Waited " + CoreConfiguration.mainThreadWaitTimeoutMillis + "ms on the main thread, which is still running this request - continuing to wait, as abandoning it now would leave two threads on one script entry.");
+                latch.await();
             }
         }
         catch (InterruptedException ex) {
@@ -339,16 +369,51 @@ public class DenizenCore {
         AsyncSchedulable.executor.execute(run);
     }
 
-    /** Processes all tasks that other threads have requested to be run on the main thread. Called automatically per-tick. */
+    /** How many tasks to run between clock readings, so that measuring the budget doesn't cost more than the small tasks it is measuring. */
+    private static final int TASKS_PER_TIME_CHECK = 64;
+
+    private static void runMainThreadTask(Runnable task) {
+        try {
+            task.run();
+        }
+        catch (Throwable ex) {
+            Debug.echoError("DenizenCore - Main thread task (from an async source) failed");
+            Debug.echoError(ex);
+        }
+    }
+
+    /**
+     * Processes the tasks that other threads have requested to be run on the main thread. Called automatically per-tick.
+     * <p>
+     * Tasks with a thread waiting on them go first and all of them run; fire-and-forget tasks then run until the tick's budget is spent,
+     * keeping their order, with whatever is left going to the next tick.
+     */
     public static void runMainThreadTasks() {
+        runMainThreadTasks(CoreConfiguration.mainThreadTaskBudgetMillis);
+    }
+
+    /** As {@link #runMainThreadTasks()}, with an explicit budget in milliseconds - 0 for "everything, however much there is". */
+    public static void runMainThreadTasks(long budgetMillis) {
         Runnable task;
-        while ((task = mainThreadTasks.poll()) != null) {
-            try {
-                task.run();
+        while ((task = mainThreadWaitingTasks.poll()) != null) {
+            runMainThreadTask(task);
+        }
+        if (budgetMillis <= 0) {
+            while ((task = mainThreadTasks.poll()) != null) {
+                runMainThreadTask(task);
             }
-            catch (Throwable ex) {
-                Debug.echoError("DenizenCore - Main thread task (from an async source) failed");
-                Debug.echoError(ex);
+        }
+        else {
+            long deadline = System.nanoTime() + budgetMillis * 1_000_000L;
+            int sinceTimeCheck = 0;
+            while ((task = mainThreadTasks.poll()) != null) {
+                runMainThreadTask(task);
+                if (++sinceTimeCheck >= TASKS_PER_TIME_CHECK) {
+                    sinceTimeCheck = 0;
+                    if (System.nanoTime() > deadline) {
+                        break;
+                    }
+                }
             }
         }
         TimedQueue queue;
