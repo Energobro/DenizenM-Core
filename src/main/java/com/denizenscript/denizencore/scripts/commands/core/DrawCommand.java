@@ -38,6 +38,9 @@ public class DrawCommand extends AbstractCommand {
     // "image:" - the image to draw, required.
     // "width:" and "height:" - the size to rescale the image being drawn to, optional.
     //
+    // This command is safe to run off the main thread, so building an image inside an <@link command async> block costs the server no time at all.
+    // As with any shared data, two scripts drawing on the same id at the same time is the script writer's problem - give a background job its own id, or its own copy.
+    //
     // @Tags
     // None
     //
@@ -68,6 +71,7 @@ public class DrawCommand extends AbstractCommand {
         setName("draw");
         setSyntax("draw [id:<id>] [pixel/rectangle/oval/image:<image>] (width:<width>) (height:<height>) (filled) [x:<x>] [y:<y>] (color:<color>)");
         setRequiredArguments(4, 8);
+        asyncSafe = true; // Pure pixel work on an image already held in memory - no file, no server, nothing outside the image.
         autoCompile();
     }
 

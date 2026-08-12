@@ -19,8 +19,8 @@ import javax.imageio.ImageIO;
 import java.awt.image.BufferedImage;
 import java.io.File;
 import java.io.IOException;
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ImageCommand extends AbstractCommand implements Holdable {
 
@@ -44,6 +44,9 @@ public class ImageCommand extends AbstractCommand implements Holdable {
     // to uniquely and globally identify the image object in memory. This ID can only be used by one image object at a time.
     // IDs are stored when "load" is used, and only removed when "unload" is used.
     //
+    // This command is safe to run off the main thread: it only touches image files and the loaded-image list.
+    // Loading and saving are the slow parts, and an <@link command async> script does that work without the server waiting for it - the same reason "~" exists for main thread scripts.
+    //
     // @Tags
     // None
     //
@@ -65,12 +68,18 @@ public class ImageCommand extends AbstractCommand implements Holdable {
     // - image id:image unload
     // -->
 
-    public static final Map<String, ImageTag> loadedImages = new HashMap<>();
+    /**
+     * The images currently loaded in memory, by id.
+     * Concurrent, because "<image[some_id]>" resolves through here (ImageTag.valueOf) from whatever thread reads the tag - the 'image' tag base is not
+     * main-thread-only - while loading and unloading write to it.
+     */
+    public static final Map<String, ImageTag> loadedImages = new ConcurrentHashMap<>();
 
     public ImageCommand() {
         setName("image");
         setSyntax("image [id:<id>] [load [image:<image>/path:<path>]]/[save [path:<path>] [format:<format>]]/[unload]");
         setRequiredArguments(2, 4);
+        asyncSafe = true; // Only reads and writes image files and its own document map - the server never comes into it.
         autoCompile();
     }
 
@@ -120,12 +129,12 @@ public class ImageCommand extends AbstractCommand implements Holdable {
                             scriptEntry.setFinished(true);
                             return;
                         }
-                        DenizenCore.runOnMainThread(() -> {
-                            ImageTag imageTag = new ImageTag(image);
-                            imageTag.id = idLower;
-                            loadedImages.put(idLower, imageTag);
-                            scriptEntry.setFinished(true);
-                        });
+                        // Finishes on the reading thread rather than bouncing to the main one: that bounce existed only because the image map was a plain HashMap.
+                        // This is how the fileread command has always worked.
+                        ImageTag imageTag = new ImageTag(image);
+                        imageTag.id = idLower;
+                        loadedImages.put(idLower, imageTag);
+                        scriptEntry.setFinished(true);
                     }
                     catch (IOException e) {
                         Debug.echoError(scriptEntry, "An error occurred while trying to load image, see stacktrace below:");
