@@ -78,10 +78,10 @@ public class RedisHelper {
             }
             catch (Throwable ex) {
                 if (isEnabled.get() || CoreConfiguration.debugVerbose) { // Ignore errors when server is shutting down
-                    DenizenCore.runOnMainThread(() -> {
-                        Debug.echoError(ex);
-                        scriptEntry.setFinished(true);
-                    });
+                    // Finishes on this thread rather than bouncing to the main one: Debug routes its own output to the main thread already,
+                    // and setFinished's volatile write is what publishes everything done here to the waiting queue.
+                    Debug.echoError(ex);
+                    scriptEntry.setFinished(true);
                 }
             }
         });
@@ -139,32 +139,26 @@ public class RedisHelper {
                         }
                     }
                     catch (final Exception e) {
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoError(scriptEntry, "Redis Exception: " + e.getMessage());
-                            scriptEntry.setFinished(true);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoError(scriptEntry, e);
-                            }
-                        });
+                        Debug.echoError(scriptEntry, "Redis Exception: " + e.getMessage());
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoError(scriptEntry, e);
+                        }
                     }
                     if (CoreConfiguration.debugVerbose) {
                         Debug.echoDebug(scriptEntry, "Connection did not error");
                     }
-                    final Jedis conn = con;
+                    // Finishes on this thread rather than bouncing to the main one - see the same note in runChecked.
                     if (con != null) {
-                        DenizenCore.runOnMainThread(() -> {
-                            connections.put(redisID, conn);
-                            Debug.echoDebug(scriptEntry, "Successfully connected to " + host + " on port " + port);
-                            scriptEntry.setFinished(true);
-                        });
+                        connections.put(redisID, con);
+                        Debug.echoDebug(scriptEntry, "Successfully connected to " + host + " on port " + port);
+                        scriptEntry.setFinished(true);
                     }
                     else {
-                        DenizenCore.runOnMainThread(() -> {
-                            scriptEntry.setFinished(true);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoDebug(scriptEntry, "Connecting errored!");
-                            }
-                        });
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoDebug(scriptEntry, "Connecting errored!");
+                        }
                     }
                 }, scriptEntry);
                 return;
@@ -243,13 +237,11 @@ public class RedisHelper {
                         scriptEntry.setFinished(true);
                     }
                     catch (final Exception ex) {
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoError(scriptEntry, "Redis Exception: " + ex.getMessage());
-                            scriptEntry.setFinished(true);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoError(scriptEntry, ex);
-                            }
-                        });
+                        Debug.echoError(scriptEntry, "Redis Exception: " + ex.getMessage());
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoError(scriptEntry, ex);
+                        }
                     }
                 };
                 if (scriptEntry.shouldWaitFor()) {
@@ -289,13 +281,11 @@ public class RedisHelper {
                         scriptEntry.setFinished(true);
                     }
                     catch (final Exception ex) {
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoError(scriptEntry, "Redis Exception: " + ex.getMessage());
-                            scriptEntry.setFinished(true);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoError(scriptEntry, ex);
-                            }
-                        });
+                        Debug.echoError(scriptEntry, "Redis Exception: " + ex.getMessage());
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoError(scriptEntry, ex);
+                        }
                     }
                 };
                 if (scriptEntry.shouldWaitFor()) {

@@ -20,6 +20,9 @@ public class RedisCommand extends AbstractCommand implements Holdable {
         isProcedural = false;
         setPrefixesHandled("auth", "port", "id", "message", "args");
         setBooleansHandled("ssl");
+        // Talks to Redis over a socket and touches its own connection and subscription maps - the Minecraft server isn't involved at any point.
+        // Note a Jedis connection is not thread-safe: two scripts using one id at the same time is the script writer's problem, exactly as it already was for two '~redis' lines.
+        asyncSafe = true;
     }
 
     // <--[command]

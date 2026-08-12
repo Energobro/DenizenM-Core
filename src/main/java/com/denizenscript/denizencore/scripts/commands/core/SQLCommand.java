@@ -31,6 +31,9 @@ public class SQLCommand extends AbstractCommand implements Holdable {
         setSyntax("sql [id:<ID>] [disconnect/connect:<server> (username:<username>) (password:<secret>) (ssl:true/{false})/query:<query>/update:<update>]");
         setRequiredArguments(2, 5);
         isProcedural = false;
+        // Talks to a database over a socket and touches its own connection map - the Minecraft server isn't involved at any point.
+        // Note the connection itself is not thread-safe: two scripts using one id at the same time is the script writer's problem, exactly as it already was for two '~sql' lines.
+        asyncSafe = true;
     }
 
     // <--[command]
@@ -109,7 +112,7 @@ public class SQLCommand extends AbstractCommand implements Holdable {
 
     /**
      * The open SQL connections, by id.
-     * Concurrent, because "&lt;util.sql_connections&gt;" iterates this from whatever thread reads the tag - the 'util' tag base is not
+     * Concurrent, because "<util.sql_connections>" iterates this from whatever thread reads the tag - the 'util' tag base is not
      * main-thread-only - while connecting and disconnecting write to it. Iterating a plain HashMap through a write is exactly what breaks.
      */
     public static Map<String, Connection> connections = new ConcurrentHashMap<>();
@@ -269,32 +272,27 @@ public class SQLCommand extends AbstractCommand implements Holdable {
                         con = getConnection(username.asString(), passwordToUse, server.asString(), ssl.asString());
                     }
                     catch (final Exception e) {
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoError(scriptEntry, "SQL Exception: " + e.getMessage());
-                            scriptEntry.setFinished(true);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoError(scriptEntry, e);
-                            }
-                        });
+                        Debug.echoError(scriptEntry, "SQL Exception: " + e.getMessage());
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoError(scriptEntry, e);
+                        }
                     }
                     if (CoreConfiguration.debugVerbose) {
                         Debug.echoDebug(scriptEntry, "Connection did not error");
                     }
-                    final Connection conn = con;
+                    // Finishes on this thread rather than bouncing to the main one: the map is concurrent now, Debug routes its own output to the main thread already,
+                    // and setFinished's volatile write is what publishes everything done here to the waiting queue.
                     if (con != null) {
-                        DenizenCore.runOnMainThread(() -> {
-                            connections.put(sqlID.asString().toUpperCase(), conn);
-                            Debug.echoDebug(scriptEntry, "Successfully connected to " + server);
-                            scriptEntry.setFinished(true);
-                        });
+                        connections.put(sqlID.asString().toUpperCase(), con);
+                        Debug.echoDebug(scriptEntry, "Successfully connected to " + server);
+                        scriptEntry.setFinished(true);
                     }
                     else {
-                        DenizenCore.runOnMainThread(() -> {
-                            scriptEntry.setFinished(true);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoDebug(scriptEntry, "Connecting errored!");
-                            }
-                        });
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoDebug(scriptEntry, "Connecting errored!");
+                        }
                     }
                 });
             }
@@ -350,20 +348,15 @@ public class SQLCommand extends AbstractCommand implements Holdable {
                         scriptEntry.saveObject("result", rows);
                         scriptEntry.saveObject("result_list", resultList);
                         scriptEntry.saveObject("result_map", resultMap);
-                        final int finalCount = count;
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoDebug(scriptEntry, "Got a query result of " + columns + " columns and " + finalCount + " rows");
-                            scriptEntry.setFinished(true);
-                        });
+                        Debug.echoDebug(scriptEntry, "Got a query result of " + columns + " columns and " + count + " rows");
+                        scriptEntry.setFinished(true);
                     }
                     catch (final Exception ex) {
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoError(scriptEntry, "SQL Exception: " + ex.getMessage());
-                            scriptEntry.setFinished(true);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoError(scriptEntry, ex);
-                            }
-                        });
+                        Debug.echoError(scriptEntry, "SQL Exception: " + ex.getMessage());
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoError(scriptEntry, ex);
+                        }
                     }
                 };
                 if (scriptEntry.shouldWaitFor()) {
@@ -408,19 +401,17 @@ public class SQLCommand extends AbstractCommand implements Holdable {
                         }
                         scriptEntry.saveObject("result", rows);
                         scriptEntry.saveObject("result_list", resultList);
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoDebug(scriptEntry, "Got a query result of " + columns + " columns");
-                            Debug.echoDebug(scriptEntry, "Updated " + affected + " rows");
-                            scriptEntry.setFinished(true);
-                        });
+                        Debug.echoDebug(scriptEntry, "Got a query result of " + columns + " columns");
+                        Debug.echoDebug(scriptEntry, "Updated " + affected + " rows");
+                        scriptEntry.setFinished(true);
                     }
                     catch (Exception ex) {
-                        DenizenCore.runOnMainThread(() -> {
-                            Debug.echoError(scriptEntry, "SQL Exception: " + ex.getMessage());
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.echoError(scriptEntry, ex);
-                            }
-                        });
+                        Debug.echoError(scriptEntry, "SQL Exception: " + ex.getMessage());
+                        // Note: this branch alone used to leave the entry unfinished, so a failed '~sql update' held its queue forever. Every other branch here finishes.
+                        scriptEntry.setFinished(true);
+                        if (CoreConfiguration.debugVerbose) {
+                            Debug.echoError(scriptEntry, ex);
+                        }
                     }
                 };
                 if (scriptEntry.shouldWaitFor()) {
