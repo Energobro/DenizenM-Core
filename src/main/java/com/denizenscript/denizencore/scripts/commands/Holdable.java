@@ -26,7 +26,7 @@ public interface Holdable {
     // Others, however, may still perform the action in a delayed/slow/off-thread manner, but simply not hold the queue.
     //
     // A few pure-logic commands - notably <@link command define> and <@link command definemap> - run their entire selves off-thread when waited for,
-    // including the parsing of the tags in their arguments. That makes "- ~define x &lt;some.very.slow.tag&gt;" calculate its value without using main thread time.
+    // including the parsing of the tags in their arguments. That makes "- ~define x <some.very.slow.tag>" calculate its value without using main thread time.
     // Only tags that are safe to read off-thread should be used that way.
     //
     // For running a whole script off-thread instead of a single command, see <@link language Async Queues>.

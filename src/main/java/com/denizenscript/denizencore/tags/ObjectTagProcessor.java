@@ -25,7 +25,7 @@ public class ObjectTagProcessor<T extends ObjectTag> {
      * See <@link language Async Tag Safety> and {@link TagManager#markObjectTypeMainThreadOnly}.
      * <p>
      * This exists in addition to the tag-base level marking because an object can reach a tag without going through its own base,
-     * for example via a definition ('&lt;[my_entity].flag[x]&gt;'), a context tag, or a procedure result.
+     * for example via a definition ('<[my_entity].flag[x]>'), a context tag, or a procedure result.
      */
     public boolean mainThreadOnly;
 

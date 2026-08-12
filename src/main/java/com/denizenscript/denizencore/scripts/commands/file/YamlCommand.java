@@ -140,7 +140,7 @@ public class YamlCommand extends AbstractCommand implements Holdable {
 
     /**
      * The loaded YAML documents, by id.
-     * Concurrent, because "&lt;yaml[...]&gt;" and "&lt;util.yaml_documents&gt;" are readable from an async queue's thread
+     * Concurrent, because "<yaml[...]>" and "<util.yaml_documents>" are readable from an async queue's thread
      * (the 'yaml' tag base reads plain saved data, so it is not main-thread-only) while the yaml command loads and unloads here.
      * Note the tag side iterates the key set, which a plain HashMap cannot survive being written to during.
      */

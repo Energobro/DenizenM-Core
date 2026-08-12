@@ -190,8 +190,8 @@ public class TagManager {
     /**
      * Marks the bare form of a main-thread-only tag base - the base written on its own, with no sub-tag and no parameter - as safe to read off-thread.
      * <p>
-     * Only for a base whose bare form hands back something the script's own context already holds: "&lt;player&gt;" returns the queue's linked player
-     * without asking the server anything, while "&lt;player[bob]&gt;" has to go and find that player and so stays main-thread-only.
+     * Only for a base whose bare form hands back something the script's own context already holds: "<player>" returns the queue's linked player
+     * without asking the server anything, while "<player[bob]>" has to go and find that player and so stays main-thread-only.
      * The object that comes back is still main-thread-only for its own tags - this only saves the hand-off for handing the object over.
      * @param baseName the name of the tag base (must already be registered, and normally already marked by {@link #markMainThreadOnly}).
      */
