@@ -5,7 +5,8 @@ import java.util.List;
 
 public class ScriptEntrySet {
 
-    public List<ScriptEntry> entries;
+    /** Final so that a set published to another thread (eg a script container's cached entries) is always seen fully built. */
+    public final List<ScriptEntry> entries;
 
     public ScriptEntrySet(List<ScriptEntry> baseEntries) {
         entries = baseEntries;

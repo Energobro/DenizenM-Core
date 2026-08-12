@@ -12,10 +12,16 @@ import com.denizenscript.denizencore.DenizenCore;
 
 import java.lang.invoke.MethodHandle;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ScriptRegistry {
 
-    public static Map<String, ScriptContainer> scriptContainers = new HashMap<>();
+    /**
+     * All loaded script containers, by lowercased name.
+     * Concurrent, as this is read off the main thread: by script tags, by 'run', and by 'inject' reading its own arguments.
+     * A script reload still empties and refills it in place, so a script read during a reload may briefly come back missing - the same caveat as any other reloadable registry.
+     */
+    public static Map<String, ScriptContainer> scriptContainers = new ConcurrentHashMap<>();
     public static Map<String, MethodHandle> typeConstructors = new HashMap<>();
 
     public static void _registerType(String typeName, Class<? extends ScriptContainer> scriptContainerClass) {

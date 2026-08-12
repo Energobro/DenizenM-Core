@@ -66,7 +66,12 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
         public List<Argument> preprocArgs = null;
 
-        public Object specialProcessedData = null;
+        /**
+         * Per-line data a command works out once and reuses (eg 'choose's jump table, 'repeat's callback entry).
+         * Volatile because this is shared by every execution of the line, including ones on async queues: the field is written only after the value is fully built,
+         * so a volatile write here is what lets another thread read that value without seeing it half-made.
+         */
+        public volatile Object specialProcessedData = null;
 
         public String originalLine = null;
 

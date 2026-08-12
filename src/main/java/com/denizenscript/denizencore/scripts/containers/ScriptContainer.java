@@ -315,13 +315,9 @@ public class ScriptContainer implements Debuggable {
         contents.set(path, object);
     }
 
-    public ScriptEntrySet baseEntries = null;
-
     public List<ScriptEntry> getBaseEntries(ScriptEntryData data) {
-        if (baseEntries == null) {
-            baseEntries = getSetFor("script");
-        }
-        return cleanDup(data, baseEntries);
+        // Note: no separate cache field for this one - 'getSetFor' already caches, in a map that can be read from any thread.
+        return cleanDup(data, getSetFor("script"));
     }
 
     public static List<ScriptEntry> cleanDup(ScriptEntryData data, ScriptEntrySet set) {
