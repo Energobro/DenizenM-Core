@@ -131,10 +131,11 @@ public class CommandExecutor {
                 scriptEntry.setFinished(true);
             }
         }
-        if (!onMainThread && !command.asyncSafe && canDefer(scriptEntry, command)) {
-            return executeDeferred(scriptEntry);
-        }
-        if (!onMainThread && !command.asyncSafe) {
+        // Order matters: the thread check and the plain field come first, so a main thread execution costs one boolean and the per-entry check is only ever asked off-thread.
+        if (!onMainThread && !command.asyncSafe && !command.isAsyncSafe(scriptEntry)) {
+            if (canDefer(scriptEntry, command)) {
+                return executeDeferred(scriptEntry);
+            }
             // This command can't safely run off-thread, so the async queue waits while the main thread runs it.
             Debug.verboseLog("Command '" + command.getName() + "' isn't async-safe, handing it to the main thread from thread '" + Thread.currentThread().getName() + "'.");
             boolean[] result = new boolean[1];

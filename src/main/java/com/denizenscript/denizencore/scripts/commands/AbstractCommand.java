@@ -232,9 +232,20 @@ public abstract class AbstractCommand {
     public boolean asyncSafe = false;
 
     /**
+     * Whether this one entry is safe to run off the main thread, for a command that is only async-safe some of the time
+     * (eg "run ... async", which starts its own thread and so has nothing for the main thread to do).
+     * <p>
+     * Only consulted when {@link #asyncSafe} is false, and only from an async queue - the plain field is the fast path.
+     * Called before the entry's arguments are parsed, so it can only look at raw input - see {@link ScriptEntry#hasRawArgument}.
+     */
+    public boolean isAsyncSafe(ScriptEntry scriptEntry) {
+        return asyncSafe;
+    }
+
+    /**
      * Whether this command should move its own execution (including its tag parsing) to a separate thread when it's '~' waited for.
      * <p>
-     * This is what makes "- ~define x &lt;some.slow.tag&gt;" run off-thread: the queue holds until the command completes,
+     * This is what makes "- ~define x <some.slow.tag>" run off-thread: the queue holds until the command completes,
      * and the rest of the server keeps running in the meantime.
      * <p>
      * Requires {@link #asyncSafe}, and requires the command to be {@link Holdable}.

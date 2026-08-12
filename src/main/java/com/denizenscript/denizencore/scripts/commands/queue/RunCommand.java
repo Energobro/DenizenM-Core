@@ -4,6 +4,7 @@ import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.objects.*;
 import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.containers.core.TaskScriptContainer;
+import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.Deprecations;
 import com.denizenscript.denizencore.utilities.ScriptUtilities;
@@ -66,6 +67,8 @@ public class RunCommand extends AbstractCommand implements Holdable {
     // The new queue's own logic (tags, math, text processing, ...) then costs no main thread time at all,
     // and any command in it that isn't safe to run off-thread is automatically handed back to the main thread.
     // Refer to <@link language Async Queues> before using this - it is not a free speed boost, and is only correct for scripts that mostly process data.
+    // Running with 'async' from a script that is itself async costs no main thread time at all: the new thread is started directly by the script that asked for it.
+    // Without 'async', a run from an async script is handed to the main thread, and the new queue runs there - a script that didn't ask to be async never becomes async by being run from one.
     //
     // The run command is ~waitable. Refer to <@link language ~waitable>.
     // Note that '~run ... async' is valid and useful: the current queue waits for the result, while the server keeps running.
@@ -109,6 +112,14 @@ public class RunCommand extends AbstractCommand implements Holdable {
     @Override
     public void addCustomTabCompletions(TabCompletionsBuilder tab) {
         tab.addScriptsOfType(TaskScriptContainer.class);
+    }
+
+    @Override
+    public boolean isAsyncSafe(ScriptEntry scriptEntry) {
+        // 'run ... async' gives the new script its own thread, so there is nothing here for the main thread to do - crossing over just to start a thread would cost a tick for nothing.
+        // A plain 'run' deliberately keeps crossing: a new queue runs on whatever thread started it, and a script that never asked to be async shouldn't become async merely by being called from one.
+        // This reads raw input, so a tag that resolves to "async" isn't seen - the crossing then still happens, which is the harmless direction.
+        return CoreConfiguration.allowAsyncScripts && scriptEntry.hasRawArgument("async");
     }
 
     @Override
