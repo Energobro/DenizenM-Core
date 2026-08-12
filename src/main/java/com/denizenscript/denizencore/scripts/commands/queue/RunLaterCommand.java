@@ -27,7 +27,7 @@ public class RunLaterCommand extends AbstractCommand {
 
     public RunLaterCommand() {
         setName("runlater");
-        setSyntax("runlater [<script>] (path:<name>) [delay:<duration>] (id:<id>) (def:<element>|.../defmap:<map>/def.<name>:<value>)");
+        setSyntax("runlater [<script>] (path:<name>) [delay:<duration>] (id:<id>) (async) (def:<element>|.../defmap:<map>/def.<name>:<value>)");
         setRequiredArguments(2, -1);
         setPrefixesHandled("id");
         allowedDynamicPrefixes = true;
@@ -35,7 +35,7 @@ public class RunLaterCommand extends AbstractCommand {
 
     // <--[command]
     // @Name RunLater
-    // @Syntax runlater [<script>] (path:<name>) [delay:<duration>] (id:<id>) (def:<element>|.../defmap:<map>/def.<name>:<value>)
+    // @Syntax runlater [<script>] (path:<name>) [delay:<duration>] (id:<id>) (async) (def:<element>|.../defmap:<map>/def.<name>:<value>)
     // @Required 2
     // @Maximum -1
     // @Short Causes a task to run sometime in the future, even if the server restarts.
@@ -58,6 +58,9 @@ public class RunLaterCommand extends AbstractCommand {
     // You can optionally specify the "id" argument to provide a unique tracking ID for the intended future run, which can then also be used to cancel it via <@link mechanism system.cancel_runlater>.
     // If you use IDs, they must be unique - you cannot have the same ID scheduled twice. Use <@link tag util.runlater_ids> if you need to dynamically check if an ID is in use.
     //
+    // Optionally specify "async" to have the script run on its own thread when the time comes, exactly as with <@link command run>'s async argument. See <@link language Async Queues>.
+    // The choice is stored along with the rest of the scheduled run, so it survives a restart.
+    //
     // Implementation note: the system that tracks when scripts should be ran is a fair bit more optimized than 'wait' commands or the 'run' command with a delay,
     // specifically for the case of very large delays (hours or more) - in the short term, 'wait' or 'run' with a delay will be better.
     //
@@ -71,6 +74,10 @@ public class RunLaterCommand extends AbstractCommand {
     // @Usage
     // Use to run a task script named 'my_task' 5 hours later with definition 'targets' set to a list of all the players that were near the player before the delay.
     // - runlater my_task delay:5h def.targets:<player.location.find_players_within[50]>
+    //
+    // @Usage
+    // Use to run a heavy report script an hour later, off the main thread.
+    // - runlater nightly_report delay:1h async
     //
     // @Usage
     // Use to plan to go for a jog tomorrow then change your mind after 5 seconds.
@@ -99,6 +106,10 @@ public class RunLaterCommand extends AbstractCommand {
             else if (arg.matchesPrefix("delay")
                     && arg.matchesArgumentType(DurationTag.class)) {
                 scriptEntry.addObject("delay", arg.asType(DurationTag.class));
+            }
+            // Checked ahead of the script name, so a script actually named "async" can't swallow the flag.
+            else if (arg.matches("async")) {
+                scriptEntry.addObject("async", new ElementTag(true));
             }
             else if (arg.hasPrefix()
                     && arg.getPrefix().getRawValue().startsWith("def.")) {
@@ -147,6 +158,7 @@ public class RunLaterCommand extends AbstractCommand {
         ScriptTag script = scriptEntry.getObjectTag("script");
         DurationTag delay = scriptEntry.getObjectTag("delay");
         MapTag defMap = scriptEntry.getObjectTag("def_map");
+        ElementTag async = scriptEntry.getElement("async");
         ElementTag id = scriptEntry.argForPrefixAsElement("id", null);
         String path = pathElement != null ? pathElement.asString() : null;
         if (script == null) {
@@ -159,7 +171,7 @@ public class RunLaterCommand extends AbstractCommand {
         }
         ListTag definitions = scriptEntry.getObjectTag("definitions");
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, getName(), script, pathElement, delay, id, defMap, definitions);
+            Debug.report(scriptEntry, getName(), script, pathElement, delay, id, async, defMap, definitions);
         }
         FutureRunData runData = new FutureRunData();
         runData.definitionList = definitions;
@@ -168,6 +180,7 @@ public class RunLaterCommand extends AbstractCommand {
         runData.path = path;
         runData.entryData = scriptEntry.entryData.clone();
         runData.executeAt = System.currentTimeMillis() + delay.getMillis();
+        runData.async = async != null && async.asBoolean();
         runData.id = id == null ? null : id.asLowerString();
         if (id != null && trackedById.containsKey(runData.id)) {
             Debug.echoError("Cannot add new RunLater with the given id '" + runData.id + "': there is already a scheduled task with that ID.");
@@ -194,6 +207,9 @@ public class RunLaterCommand extends AbstractCommand {
 
         public String id;
 
+        /** Whether this run should get its own thread when the time comes. Saved along with the rest, so a restart doesn't quietly turn it back into a main thread run. */
+        public boolean async;
+
         public boolean cancelled = false;
 
         public void load(YamlConfiguration config) {
@@ -201,6 +217,7 @@ public class RunLaterCommand extends AbstractCommand {
             path = config.getString("path", null);
             definitionList = config.contains("definition_list") ? ListTag.valueOf(config.getString("definition_list"), CoreUtilities.errorButNoDebugContext) : null;
             defMap = config.contains("definitions") ? MapTag.valueOf(config.getString("definitions"), CoreUtilities.errorButNoDebugContext) : null;
+            async = config.contains("async");
             entryData = DenizenCore.implementation.getEmptyScriptEntryData().clone();
             entryData.load(config.getConfigurationSection("entry_data"));
         }
@@ -224,6 +241,10 @@ public class RunLaterCommand extends AbstractCommand {
             out.set("entry_data", entryData.save());
             if (id != null) {
                 out.set("id", id);
+            }
+            // Written only when set, so old files (which have no such key) simply load as non-async.
+            if (async) {
+                out.set("async", "true");
             }
             return out;
         }
@@ -256,7 +277,8 @@ public class RunLaterCommand extends AbstractCommand {
                         }
                     }
                 };
-                ScriptQueue result = ScriptUtilities.createAndStartQueue(script.getContainer(), path, entryData, null, configure, null, null, definitionList, script.getContainer());
+                // Started from the main thread by tickFutureRuns, which is where an async queue is meant to be started from.
+                ScriptQueue result = ScriptUtilities.createAndStartQueue(script.getContainer(), path, entryData, null, configure, null, null, definitionList, script.getContainer(), async);
                 if (result == null) {
                     Debug.echoError("RunLater: script run failed!");
                     return;
