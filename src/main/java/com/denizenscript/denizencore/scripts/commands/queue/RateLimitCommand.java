@@ -10,7 +10,8 @@ import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.utilities.Deprecations;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
-import java.util.HashMap;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class RateLimitCommand extends AbstractCommand {
 
@@ -19,6 +20,9 @@ public class RateLimitCommand extends AbstractCommand {
         setSyntax("ratelimit [<object>] [<duration>]");
         setRequiredArguments(2, 2);
         isProcedural = true;
+        // Nothing here reaches the server: the timers are a concurrent map on the line's shared internals, the clock is DenizenCore's own tick time,
+        // and the only side effect is clearing and stopping this entry's own queue - which ScriptQueue.stop already routes to that queue's thread.
+        setAsyncSafe(true);
     }
 
     // <--[command]
@@ -77,19 +81,37 @@ public class RateLimitCommand extends AbstractCommand {
         if (scriptEntry.dbCallShouldDebug()) {
             Debug.report(scriptEntry, getName(), duration, object);
         }
-        if (scriptEntry.internal.specialProcessedData == null) {
-            scriptEntry.internal.specialProcessedData = new HashMap<>(2);
+        // The timers belong to the script line, not to one run of it, so they live on the shared internals rather than on this entry's own.
+        // An async queue is handed private internals, so writing them to 'internal' directly would give every such queue its own set of timers -
+        // ie no rate limiting at all for a script that is only ever run async.
+        ScriptEntry.ScriptEntryInternal shared = scriptEntry.sharedInternal();
+        Map<String, Long> map = (Map<String, Long>) shared.specialProcessedData;
+        if (map == null) {
+            // Two queues can reach an unused line at the same moment, and only one map may win - otherwise one of them keeps timers nobody reads.
+            synchronized (shared) {
+                map = (Map<String, Long>) shared.specialProcessedData;
+                if (map == null) {
+                    map = new ConcurrentHashMap<>(2);
+                    shared.specialProcessedData = map;
+                }
+            }
         }
-        HashMap<String, Long> map = (HashMap<String, Long>) scriptEntry.internal.specialProcessedData;
         String key = object.asLowerString();
-        Long endTime = map.get(key);
         long curTime = DenizenCore.serverTimeMillis;
-        if (endTime != null && curTime < endTime) {
-            Debug.echoDebug(scriptEntry, "Rate limit applied with " + (endTime - curTime) + "ms left.");
+        long newEndTime = curTime + duration.getMillis();
+        // Read and write in one atomic step: a rate limiter that two queues can pass at the same instant is not a rate limiter.
+        long[] blockedUntil = new long[1];
+        map.compute(key, (k, endTime) -> {
+            if (endTime != null && curTime < endTime) {
+                blockedUntil[0] = endTime;
+                return endTime;
+            }
+            return newEndTime;
+        });
+        if (blockedUntil[0] != 0) {
+            Debug.echoDebug(scriptEntry, "Rate limit applied with " + (blockedUntil[0] - curTime) + "ms left.");
             scriptEntry.getResidingQueue().clear();
             scriptEntry.getResidingQueue().stop();
-            return;
         }
-        map.put(key, curTime + duration.getMillis());
     }
 }

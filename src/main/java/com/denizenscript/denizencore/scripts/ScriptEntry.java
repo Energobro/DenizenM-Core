@@ -104,6 +104,15 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         public volatile long asyncBlockMaxNanos = -1;
 
         /**
+         * The internals this one was copied from by {@link #duplicateForAsync}, or null on the original.
+         * <p>
+         * Every queue running a given script gets its own {@link ScriptEntry} clones, but those clones share one set of internals - which is what lets
+         * a command keep state that belongs to a script *line* rather than to a run of it. An async entry breaks that sharing on purpose, so anything
+         * genuinely per-line has to be read and written through {@link ScriptEntry#sharedInternal()} instead.
+         */
+        public ScriptEntryInternal asyncSourceInternal = null;
+
+        /**
          * Creates a copy of this internal data with its own private argument objects.
          * <p>
          * Normally, cloned script entries share their internals (including the single reusable Argument object per raw argument),
@@ -112,6 +121,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
          */
         public ScriptEntryInternal duplicateForAsync() {
             ScriptEntryInternal result = new ScriptEntryInternal();
+            // Chains of duplicates all point at the one original, so per-line state stays in a single place no matter how the entry got here.
+            result.asyncSourceInternal = asyncSourceInternal != null ? asyncSourceInternal : this;
             result.command = command;
             result.actualCommand = actualCommand;
             result.pre_tagged_args = pre_tagged_args;
@@ -246,6 +257,17 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
      * Gives this entry its own private copy of its internal argument data, so that it can safely be executed off the main thread.
      * Called automatically for entries in async queues and for '~' waited commands that run async - manual calls are only needed for custom execution paths.
      */
+    /**
+     * The one set of internals shared by every queue running this script line, which for an async entry is not its own.
+     * <p>
+     * Use this for state that belongs to the line rather than to a run of it - {@code ratelimit}'s timers are the case that matters.
+     * Writing such state to {@link #internal} directly works right up until an async queue runs the line, at which point each queue
+     * quietly gets its own copy and the state stops being shared at all.
+     */
+    public ScriptEntryInternal sharedInternal() {
+        return internal.asyncSourceInternal != null ? internal.asyncSourceInternal : internal;
+    }
+
     public void makeAsyncSafe() {
         if (internal.asyncOwner == this) {
             return;
