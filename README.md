@@ -57,6 +57,8 @@ Databases: `sql`, `redis` - a socket to another server and their own connection 
 
 Images: `image`, `draw` - pixel work and image files, with no server state anywhere in them. Building or resizing an image is exactly the kind of CPU work that has no business on the main thread.
 
+Sending things to a client: `announce`, `narrate`, `actionbar`, `toast`. Handing a packet to a player's connection off the main thread is a supported path, not a violation - the connection queues it when the caller isn't the main thread. These were fire-and-forget commands first (see below), which already cost the script nothing; being safe outright additionally spares the main thread the work, which is the actual point. Two lines are excluded and still go over: `narrate`/`actionbar` with `per_player`, which reparse the text once per target, and `announce ... to_permission:<node>`, which asks a permissions plugin.
+
 `run` is safe when the line says `async`, since it then only starts a thread. A plain `run` still goes to the main thread, and the script it starts runs there: being called from an async script never makes a script async by itself.
 
 **Tags** - anything that processes data rather than reading the server: elements, math, lists, maps, durations, text, `<util...>`, `<queue...>`, `<script...>`, definitions. Implementations may also exempt specific live-object tags that only read fields already stored on the object, or a whole object type where nothing it holds is live.
@@ -78,6 +80,8 @@ A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back
 Some commands only send something out and never report anything back. Those are handed over *without* the script waiting: their arguments, including all tags, are read on the script's own thread at the moment the script reaches the line, and only the sending is left for the main thread. The script carries on immediately, and deferred commands keep the order the script wrote them in.
 
 Implementations mark these; in Denizen they are `narrate`, `actionbar`, `announce`, `playsound`, `playeffect`, `showfake`, `debugblock`, `toast`, `compass`, `fakeequip` and `sidebar`.
+
+Being safe off the main thread is strictly better than being handed over, and it is checked first - so for the four listed as safe above, this only ever applies to a line they exclude. `announce ... to_permission:<node>` is such a line and is still handed over this way; `narrate`/`actionbar` with `per_player` are excluded from both, and go over with the script waiting.
 
 A command that builds its arguments and its execution into one generated step (`autoCompile`) cannot be handed over this way, since there is nothing left to split - that is what rules out `title`, `chat`, `blockcrack` and `tablist`.
 
