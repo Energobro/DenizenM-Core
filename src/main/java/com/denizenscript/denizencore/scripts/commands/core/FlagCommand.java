@@ -9,6 +9,7 @@ import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.data.ActionableDataProvider;
 import com.denizenscript.denizencore.utilities.data.DataAction;
@@ -29,6 +30,11 @@ public class FlagCommand extends AbstractCommand {
         setRequiredArguments(1, 3);
         isProcedural = false;
         allowedDynamicPrefixes = true;
+        // Async-safe as a plain field rather than per entry, because which targets a line writes to is only known after parseArgs,
+        // while isAsyncSafe(ScriptEntry) is asked before it. So the split happens inside execute instead: a line whose every target
+        // keeps its flags in Denizen's own storage runs on the script's thread, and anything else hands the whole line over exactly as before.
+        // Deferring is not an option for this command at all - scripts read a flag on the very next line after writing it.
+        setAsyncSafe(true);
     }
 
     // <--[language]
@@ -227,9 +233,40 @@ public class FlagCommand extends AbstractCommand {
         }
     }
 
+    /**
+     * Returns true if every target of this line keeps its flags somewhere that can be reached from another thread.
+     * Only asked off the main thread, so the ordinary case never runs it.
+     * Resolving the target objects is itself safe - what it costs is a lookup in Denizen's own storage, not a trip to the live server;
+     * it is fetching their trackers that would, which is why the question is asked of the object instead.
+     */
+    public boolean canWriteOffThread(ListTag targets, ScriptEntry scriptEntry) {
+        for (ObjectTag object : targets.objectForms) {
+            if (CoreUtilities.equalsIgnoreCase(object.toString(), "server")) {
+                continue;
+            }
+            FlaggableObject flaggable = object instanceof FlaggableObject ? (FlaggableObject) object
+                    : DenizenCore.implementation.simpleWordToFlaggable(object.toString(), scriptEntry);
+            if (flaggable == null || !flaggable.isFlagTrackerAsyncSafe()) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     @Override
     public void execute(ScriptEntry scriptEntry) {
         ListTag targets = scriptEntry.getObjectTag("targets");
+        if (!DenizenCore.isMainThread() && !canWriteOffThread(targets, scriptEntry)) {
+            // Hands the line over as a whole, which is what an unmarked command would have cost anyway - one crossing, targets still in order.
+            long startTime = System.nanoTime();
+            DenizenCore.runOnMainThreadAndWait(() -> writeFlags(scriptEntry, targets));
+            ScriptQueue.recordMainThreadWait(scriptEntry.getResidingQueue(), System.nanoTime() - startTime);
+            return;
+        }
+        writeFlags(scriptEntry, targets);
+    }
+
+    public void writeFlags(ScriptEntry scriptEntry, ListTag targets) {
         TimeTag expiration = scriptEntry.getObjectTag("expiration");
         DataAction flagAction = (DataAction) scriptEntry.getObject("flag_action");
         if (scriptEntry.dbCallShouldDebug()) {
@@ -268,7 +305,11 @@ public class FlagCommand extends AbstractCommand {
                 continue;
             }
             ((FlagActionProvider) flagAction.provider).tracker = tracker;
-            flagAction.execute(scriptEntry.getContext());
+            // Held across the whole action, not just the write inside it: an action like ':+:1' reads the old value and writes the new one,
+            // and two scripts doing that at the same instant would otherwise both read the same old value and one increment would vanish.
+            synchronized (tracker.writeLock) {
+                flagAction.execute(scriptEntry.getContext());
+            }
             if (object instanceof FlaggableObject) {
                 ((FlaggableObject) object).reapplyTracker(tracker);
             }

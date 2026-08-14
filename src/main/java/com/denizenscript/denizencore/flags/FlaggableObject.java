@@ -28,6 +28,18 @@ public interface FlaggableObject extends ObjectTag {
 
     void reapplyTracker(AbstractFlagTracker tracker);
 
+    /**
+     * Returns true if this object's flag tracker can be reached and written from a thread other than the main one.
+     * That is a question about how the tracker is stored and fetched, not about the flag data itself: writes to the map based trackers
+     * have been safe to do off-thread since flag writes started publishing rebuilt paths, so what is left to ask is whether
+     * getFlagTracker itself touches the live server - which is what rules out entities, chunks and NPCs.
+     * Answered per object type rather than per tracker because the tracker cannot be fetched until the answer is known.
+     * The '- flag' command asks this only when it is already running off the main thread, and hands the whole line over if any target says no.
+     */
+    default boolean isFlagTrackerAsyncSafe() {
+        return false;
+    }
+
     default String getReasonNotFlaggable() {
         return "unknown reason - something went wrong";
     }
