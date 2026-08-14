@@ -183,9 +183,11 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
 
     @Override
     public void setFlag(String key, ObjectTag value, TimeTag expiration, boolean doFlaggify) {
+        // Split and built before the lock is taken. Neither reads what is stored, and converting a value can be real work -
+        // holding the lock through it would be holding it against the main thread for no reason.
+        List<String> splitKey = CoreUtilities.split(key, '.');
+        MapTag resultMap = value == null ? null : buildFlagMap(value, expiration, doFlaggify);
         synchronized (writeLock) {
-            List<String> splitKey = CoreUtilities.split(key, '.');
-            MapTag resultMap = value == null ? null : buildFlagMap(value, expiration, doFlaggify);
             if (splitKey.size() == 1) {
                 // A flat key replaces its root map whole, and the root storage publishes that in one step - there is nothing to tear.
                 setRootMap(key, resultMap);
