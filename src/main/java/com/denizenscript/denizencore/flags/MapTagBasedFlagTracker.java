@@ -8,7 +8,6 @@ import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
@@ -107,32 +106,43 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
         return (TimeTag) getFlagValueOfType(key, expirationString);
     }
 
-    public boolean doClean(MapTag map) {
+    /**
+     * Returns a copy of the given flag sub-map with every expired entry dropped, or null if there was nothing expired to drop.
+     * A copy rather than an edit in place, because the map handed in may be one that a script on another thread is walking right now,
+     * and dropping a key out of a live map is exactly the restructuring a reader cannot survive.
+     * Only the maps that actually change are copied - untouched branches are carried over by reference.
+     */
+    public MapTag cleanedCopy(MapTag map) {
         if (CoreConfiguration.skipAllFlagCleanings) {
-            return false;
+            return null;
         }
-        boolean anyCleaned = false;
-        ArrayList<StringHolder> toRemove = new ArrayList<>();
+        MapTag result = null;
         for (Map.Entry<StringHolder, ObjectTag> entry : map.entrySet()) {
             if (!(entry.getValue() instanceof MapTag)) {
                 continue;
             }
-            if (isExpired(((MapTag) entry.getValue()).getObject(expirationString))) {
-                toRemove.add(entry.getKey());
-                anyCleaned = true;
+            MapTag flagMap = (MapTag) entry.getValue();
+            if (isExpired(flagMap.getObject(expirationString))) {
+                if (result == null) {
+                    result = new MapTag(map);
+                }
+                result.remove(entry.getKey());
+                continue;
             }
-            else {
-                ObjectTag subValue = ((MapTag) entry.getValue()).getObject(valueString);
-                if (subValue instanceof MapTag) {
-                    boolean didClean = doClean((MapTag) subValue);
-                    anyCleaned = anyCleaned || didClean;
+            ObjectTag subValue = flagMap.getObject(valueString);
+            if (subValue instanceof MapTag) {
+                MapTag cleanedSub = cleanedCopy((MapTag) subValue);
+                if (cleanedSub != null) {
+                    if (result == null) {
+                        result = new MapTag(map);
+                    }
+                    MapTag cleanedFlagMap = new MapTag(flagMap);
+                    cleanedFlagMap.putObject(valueString, cleanedSub);
+                    result.putObject(entry.getKey(), cleanedFlagMap);
                 }
             }
         }
-        for (StringHolder str : toRemove) {
-            map.remove(str);
-        }
-        return anyCleaned;
+        return result;
     }
 
     public MapTag flaggifyMapTag(MapTag map) {
@@ -150,65 +160,122 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
         return toReturn;
     }
 
+    /**
+     * Builds the stored form of one flag: the value under '__value', plus the expiration if the write carried one.
+     */
+    public MapTag buildFlagMap(ObjectTag value, TimeTag expiration, boolean doFlaggify) {
+        if (value instanceof MapTag && !doFlaggify) {
+            return (MapTag) value;
+        }
+        MapTag resultMap = new MapTag();
+        if (value.shouldBeType(MapTag.class)) {
+            MapTag mappified = value.asType(MapTag.class, CoreUtilities.noDebugContext);
+            if (mappified != null) {
+                value = flaggifyMapTag(mappified);
+            }
+        }
+        resultMap.putObject(valueString, value);
+        if (expiration != null) {
+            resultMap.putObject(expirationString, expiration);
+        }
+        return resultMap;
+    }
+
     @Override
     public void setFlag(String key, ObjectTag value, TimeTag expiration, boolean doFlaggify) {
-        List<String> splitKey = CoreUtilities.split(key, '.');
-        if (value == null && splitKey.size() == 1) {
-            setRootMap(key, null);
-            return;
+        synchronized (writeLock) {
+            List<String> splitKey = CoreUtilities.split(key, '.');
+            MapTag resultMap = value == null ? null : buildFlagMap(value, expiration, doFlaggify);
+            if (splitKey.size() == 1) {
+                // A flat key replaces its root map whole, and the root storage publishes that in one step - there is nothing to tear.
+                setRootMap(key, resultMap);
+                return;
+            }
+            if (resultMap != null && setDeepFlagInPlace(splitKey, resultMap)) {
+                return;
+            }
+            setDeepFlagRebuilding(splitKey, resultMap);
         }
+    }
+
+    /**
+     * Handles the ordinary case of a deep write: every map along the path is already there and the final key already exists,
+     * so the write is one value replacement and no map along the way changes shape.
+     * That is what makes it safe against a reader on another thread - replacing the value of a key that is already present
+     * neither resizes the map nor bumps its modification count, so a walk in progress cannot notice.
+     * Returns false when anything about the path has to change, leaving the caller to rebuild it instead.
+     */
+    public boolean setDeepFlagInPlace(List<String> splitKey, MapTag resultMap) {
         MapTag rootMap = getRootMap(splitKey.get(0));
-        MapTag map = rootMap;
-        String endKey = splitKey.get(splitKey.size() - 1);
+        if (rootMap == null) {
+            return false;
+        }
+        MapTag map = null;
         for (int i = 0; i < splitKey.size() - 1; i++) {
-            MapTag flagMap = i == 0 ? rootMap : (MapTag) map.getObject(splitKey.get(i));
-            if (flagMap == null) {
-                flagMap = new MapTag();
-                if (i == 0) {
-                    rootMap = flagMap;
-                    setRootMap(splitKey.get(0), flagMap);
+            MapTag flagMap;
+            if (i == 0) {
+                flagMap = rootMap;
+            }
+            else {
+                ObjectTag subFlagMap = map.getObject(splitKey.get(i));
+                if (!(subFlagMap instanceof MapTag)) {
+                    return false;
                 }
-                else {
-                    map.putObject(splitKey.get(i), flagMap);
-                }
+                flagMap = (MapTag) subFlagMap;
+            }
+            if (flagMap.containsKey(expirationString)) {
+                // The rebuild path clears the expiration of every map above the one being written, and removing a key is a change of shape.
+                return false;
             }
             ObjectTag innerMapTag = flagMap.getObject(valueString);
-            flagMap.remove(expirationString);
             if (!(innerMapTag instanceof MapTag)) {
-                innerMapTag = new MapTag();
-                flagMap.putObject(valueString, innerMapTag);
+                return false;
             }
             map = (MapTag) innerMapTag;
         }
-        if (value == null) {
+        String endKey = splitKey.get(splitKey.size() - 1);
+        if (!map.containsKey(endKey)) {
+            return false;
+        }
+        map.putObject(endKey, resultMap);
+        setRootMap(splitKey.get(0), rootMap);
+        return true;
+    }
+
+    /**
+     * Handles the deep writes that change the shape of the path: a key appearing for the first time, a key being removed,
+     * or an expiration being cleared off a map above the one written.
+     * Every map that changes is copied and linked into a copy of its parent, so no map a reader might be walking is ever restructured,
+     * and the whole rebuilt path becomes visible in the single setRootMap call at the end.
+     * Branches the write does not touch are carried over by reference, so the cost is the width of the path, not the size of the flag.
+     */
+    public void setDeepFlagRebuilding(List<String> splitKey, MapTag resultMap) {
+        MapTag existingRoot = getRootMap(splitKey.get(0));
+        MapTag rootMap = existingRoot == null ? new MapTag() : new MapTag(existingRoot);
+        MapTag map = null;
+        for (int i = 0; i < splitKey.size() - 1; i++) {
+            MapTag flagMap;
+            if (i == 0) {
+                flagMap = rootMap;
+            }
+            else {
+                ObjectTag subFlagMap = map.getObject(splitKey.get(i));
+                flagMap = subFlagMap instanceof MapTag ? new MapTag((MapTag) subFlagMap) : new MapTag();
+                map.putObject(splitKey.get(i), flagMap);
+            }
+            flagMap.remove(expirationString);
+            ObjectTag innerMapTag = flagMap.getObject(valueString);
+            MapTag innerMap = innerMapTag instanceof MapTag ? new MapTag((MapTag) innerMapTag) : new MapTag();
+            flagMap.putObject(valueString, innerMap);
+            map = innerMap;
+        }
+        String endKey = splitKey.get(splitKey.size() - 1);
+        if (resultMap == null) {
             map.remove(endKey);
-            setRootMap(splitKey.get(0), rootMap);
         }
         else {
-            MapTag resultMap;
-            if (value instanceof MapTag && !doFlaggify) {
-                resultMap = (MapTag) value;
-            }
-            else {
-                resultMap = new MapTag();
-                if (value.shouldBeType(MapTag.class)) {
-                    MapTag mappified = value.asType(MapTag.class, CoreUtilities.noDebugContext);
-                    if (mappified != null) {
-                        value = flaggifyMapTag(mappified);
-                    }
-                }
-                resultMap.putObject(valueString, value);
-                if (expiration != null) {
-                    resultMap.putObject(expirationString, expiration);
-                }
-            }
-            if (splitKey.size() != 1) {
-                map.putObject(endKey, resultMap);
-                setRootMap(splitKey.get(0), rootMap);
-            }
-            else {
-                setRootMap(key, resultMap);
-            }
+            map.putObject(endKey, resultMap);
         }
+        setRootMap(splitKey.get(0), rootMap);
     }
 }

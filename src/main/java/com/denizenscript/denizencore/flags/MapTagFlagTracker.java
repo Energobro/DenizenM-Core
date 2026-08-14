@@ -16,8 +16,8 @@ public class MapTagFlagTracker extends MapTagBasedFlagTracker {
     }
 
     public MapTagFlagTracker(MapTag map) {
-        this.map = map;
-        doClean(map);
+        MapTag cleaned = cleanedCopy(map);
+        this.map = cleaned == null ? map : cleaned;
     }
 
     public MapTagFlagTracker(String mapTagValue, TagContext context) {

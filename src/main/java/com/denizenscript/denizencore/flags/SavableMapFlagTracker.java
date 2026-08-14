@@ -132,11 +132,15 @@ public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
                 modified = true;
             }
             else if (hasSubMap) {
-                ObjectTag subValue = val.getMap().getObject(valueString);
+                MapTag rootMap = val.getMap();
+                ObjectTag subValue = rootMap.getObject(valueString);
                 if (subValue instanceof MapTag) {
-                    if (doClean((MapTag) subValue)) {
-                        val.string = null;
-                        modified = true;
+                    MapTag cleaned = cleanedCopy((MapTag) subValue);
+                    if (cleaned != null) {
+                        // Republished rather than edited in place: this map is live, and an async script may be reading it right now.
+                        MapTag cleanedRoot = new MapTag(rootMap);
+                        cleanedRoot.putObject(valueString, cleaned);
+                        setRootMap(entry.getKey().str, cleanedRoot);
                     }
                 }
             }

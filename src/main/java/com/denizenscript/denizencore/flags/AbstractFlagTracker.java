@@ -12,6 +12,16 @@ import java.util.Collection;
 
 public abstract class AbstractFlagTracker {
 
+    /**
+     * Held by anything that writes flags on this tracker, and by nothing that reads them.
+     * Two separate jobs:
+     * - a write publishes a whole rebuilt path at once, so two writers racing each other would silently lose one of the two changes;
+     * - an action like '- flag server counter:+:1' reads the old value and writes the new one, which is only atomic while one writer runs at a time.
+     * Readers stay lock-free instead: the write path never restructures a map that a reader could be walking, it copies and republishes.
+     * That asymmetry is deliberate - flags are read far more often than they are written, and reads happen on the main thread.
+     */
+    public final Object writeLock = new Object();
+
     public abstract MapTag getRootMap(String key);
 
     public abstract void setRootMap(String key, MapTag map);
