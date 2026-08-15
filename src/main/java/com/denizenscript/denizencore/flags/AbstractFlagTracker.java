@@ -22,6 +22,15 @@ public abstract class AbstractFlagTracker {
      */
     public final Object writeLock = new Object();
 
+    /**
+     * The lock a writer must hold, which is not always this tracker's own: a tracker that writes through to another one
+     * has to share that one's lock, or two writers would take different locks and land in the same map anyway.
+     * Always go through this rather than reading the field directly.
+     */
+    public Object getWriteLock() {
+        return writeLock;
+    }
+
     public abstract MapTag getRootMap(String key);
 
     public abstract void setRootMap(String key, MapTag map);

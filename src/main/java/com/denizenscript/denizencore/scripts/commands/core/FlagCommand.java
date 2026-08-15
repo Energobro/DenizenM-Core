@@ -307,7 +307,7 @@ public class FlagCommand extends AbstractCommand {
             ((FlagActionProvider) flagAction.provider).tracker = tracker;
             // Held across the whole action, not just the write inside it: an action like ':+:1' reads the old value and writes the new one,
             // and two scripts doing that at the same instant would otherwise both read the same old value and one increment would vanish.
-            synchronized (tracker.writeLock) {
+            synchronized (tracker.getWriteLock()) {
                 flagAction.execute(scriptEntry.getContext());
             }
             if (object instanceof FlaggableObject) {

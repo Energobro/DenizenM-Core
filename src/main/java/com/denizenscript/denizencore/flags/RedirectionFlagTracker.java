@@ -21,6 +21,13 @@ public class RedirectionFlagTracker extends AbstractFlagTracker {
     public String prefix;
 
     @Override
+    public Object getWriteLock() {
+        // A redirection tracker is built fresh on every getFlagTracker() call, so its own lock would be a new object each time and guard nothing.
+        // Every write here ends up in the tracker being redirected to, so that is the one whose lock decides who writes when.
+        return original.getWriteLock();
+    }
+
+    @Override
     public MapTag getRootMap(String key) {
         List<String> parts = CoreUtilities.split(prefix, '.');
         parts.add(key);
