@@ -240,6 +240,12 @@ public class TimeTag implements ObjectTag, Adjustable, FlaggableObject {
         // Nothing to do.
     }
 
+    @Override
+    public boolean isFlagTrackerAsyncSafe() {
+        // A time's flags are a corner of the server flag map, reached by the instant this object already holds.
+        return true;
+    }
+
     public static void register() {
 
         AbstractFlagTracker.registerFlagHandlers(tagProcessor);
