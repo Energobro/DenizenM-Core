@@ -57,7 +57,11 @@ Databases: `sql`, `redis` - a socket to another server and their own connection 
 
 Images: `image`, `draw` - pixel work and image files, with no server state anywhere in them. Building or resizing an image is exactly the kind of CPU work that has no business on the main thread.
 
-Sending things to a client: `announce`, `narrate`, `actionbar`, `toast`, `debugblock`, and `playeffect` when it names its targets. Handing a packet to a player's connection off the main thread is a supported path, not a violation - the connection queues it when the caller isn't the main thread. These were fire-and-forget commands first (see below), which already cost the script nothing; being safe outright additionally spares the main thread the work, which is the actual point. The exclusions: `narrate`/`actionbar` with `per_player`, which reparse the text once per target; `announce ... to_permission:<node>`, which asks a permissions plugin; and `playeffect` without `targets:`, which has to go looking for who is near enough to see it. A `playeffect` aiming a vibration at an entity crosses once for that entity and no more.
+Flags: `flag`, when every target on the line keeps its flags in Denizen's own storage - the server, a player, a noted area or inventory, and the types that live in a corner of the server's flag map (a material, an enchantment, a biome, a plugin, a script, a time). Any other target keeps its flags on the live object itself - an entity, a location, a chunk, an NPC, a world - so a line naming one is handed over whole, which costs exactly what it cost before: one crossing, targets still in order. Reading flags was already free; what changed underneath is that a write no longer edits the stored maps in place, it publishes a rebuilt path, so a reader on another thread can never be walking a map while it is restructured.
+
+`ratelimit` is safe as well, and one limit is shared by every queue running that line rather than one growing per thread.
+
+Sending things to a client: `announce`, `narrate`, `actionbar`, `toast`, `debugblock`, `title`, and `playeffect` when it names its targets. Handing a packet to a player's connection off the main thread is a supported path, not a violation - the connection queues it when the caller isn't the main thread. These were fire-and-forget commands first (see below), which already cost the script nothing; being safe outright additionally spares the main thread the work, which is the actual point. The exclusions: `narrate`/`actionbar`/`title` with `per_player`, which reparse the text once per target; `announce ... to_permission:<node>`, which asks a permissions plugin; and `playeffect` without `targets:`, which has to go looking for who is near enough to see it. A `playeffect` aiming a vibration at an entity crosses once for that entity and no more.
 
 Commands that only *look* like they belong here: `playsound` cannot be marked, because its world-wide form is guarded by the server itself and its two forms are told apart too late to split; `compass`, `fakeequip`, `showfake` and `sidebar` each keep state on the server side rather than only sending. All of them are still fire-and-forget, so an async script does not wait for them either way.
 
@@ -71,7 +75,7 @@ A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back
 
 ### Not safe (handed to the main thread, script waits)
 
-**Commands** - anything that changes or reads the live server: `flag`, `adjust`, `note`, `run` (without `async`), `runlater`, `queue`, `ratelimit`, `mongo`, `reload`, plus every world-touching command an implementation adds (teleport, spawn, give, ...).
+**Commands** - anything that changes or reads the live server: `adjust`, `note`, `run` (without `async`), `runlater`, `queue`, `mongo`, `reload`, plus every world-touching command an implementation adds (teleport, spawn, give, ...).
 
 `mongo` is listed here because it has not been tested off-thread, not because anything was found wrong with it - its own I/O already runs on a separate thread either way, so `~mongo` does not block the main thread regardless. `sql` and `redis` are built the same way and have since been marked safe: their threading has been measured off-thread (no hand-offs, and a failed connect releases its queue from the worker rather than hanging it), while the round trip of real query results is still waiting on a test against a live database.
 
@@ -85,7 +89,7 @@ Implementations mark these; in Denizen they are `narrate`, `actionbar`, `announc
 
 Being safe off the main thread is strictly better than being handed over, and it is checked first - so for the four listed as safe above, this only ever applies to a line they exclude. `announce ... to_permission:<node>` is such a line and is still handed over this way; `narrate`/`actionbar` with `per_player` are excluded from both, and go over with the script waiting.
 
-A command that builds its arguments and its execution into one generated step (`autoCompile`) cannot be handed over this way, since there is nothing left to split - that is what rules out `title`, `chat`, `blockcrack` and `tablist`.
+A command that builds its arguments and its execution into one generated step (`autoCompile`) cannot be handed over this way, since there is nothing left to split - that is what rules out `chat`, `blockcrack` and `tablist`. It does not stop a command being safe outright, which is the better answer anyway and is how `image`, `draw` and `title` avoid the wait instead.
 
 A line is **not** handed over this way if the script is waiting for it anyway - `~`, a `save:` argument, or an `if:` argument - or if the command says this particular line can't be (for example `narrate ... per_player`, which has to parse its text once per target at the exact moment it sends).
 
