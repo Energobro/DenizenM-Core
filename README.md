@@ -63,15 +63,15 @@ Flags: `flag`, when every target on the line keeps its flags in Denizen's own st
 
 Sending things to a client: `announce`, `narrate`, `actionbar`, `toast`, `debugblock`, `title`, and `playeffect` when it names its targets. Handing a packet to a player's connection off the main thread is a supported path, not a violation - the connection queues it when the caller isn't the main thread. These were fire-and-forget commands first (see below), which already cost the script nothing; being safe outright additionally spares the main thread the work, which is the actual point. The exclusions: `narrate`/`actionbar`/`title` with `per_player`, which reparse the text once per target; `announce ... to_permission:<node>`, which asks a permissions plugin; and `playeffect` without `targets:`, which has to go looking for who is near enough to see it. A `playeffect` aiming a vibration at an entity crosses once for that entity and no more.
 
-Commands that only *look* like they belong here: `playsound` cannot be marked, because its world-wide form is guarded by the server itself and its two forms are told apart too late to split; `compass`, `fakeequip`, `showfake` and `sidebar` each keep state on the server side rather than only sending. All of them are still fire-and-forget, so an async script does not wait for them either way.
+Commands that only *look* like they belong here: `playsound` cannot be marked, because its world-wide form is guarded by the server itself and its two forms are told apart too late to split; `compass` and `showfake` read the world to do their job (where a location's world really is, whether a chunk is loaded); `fakeequip` looks up a live entity per target; and `sidebar` rewrites a display object that another thread may be reading. All of them are still fire-and-forget, so an async script does not wait for them either way. `fakespawn` is the one of that family that does cost a wait, and it cannot be split (see below): building the fake entity goes through the live world and then applies the script's own mechanisms to it.
 
 `run` is safe when the line says `async`, since it then only starts a thread. A plain `run` still goes to the main thread, and the script it starts runs there: being called from an async script never makes a script async by itself.
 
 **Tags** - anything that processes data rather than reading the server: elements, math, lists, maps, durations, text, `<util...>`, `<queue...>`, `<script...>`, definitions. Implementations may also exempt specific live-object tags that only read fields already stored on the object, or a whole object type where nothing it holds is live.
 
-In Denizen that currently covers, among others: a location's arithmetic and its whole `<location[...]>` base; the geometry of cuboids, ellipsoids and polygons, and flags on any noted one; every tag on a biome; a material, an enchantment, a trade; and on a player, `uuid`, `name`, `is_online`, op/whitelist/ban status, first- and last-played times, and chat history.
+In Denizen that currently covers, among others: a location's arithmetic and its whole `<location[...]>` base; the geometry of cuboids, ellipsoids and polygons, and flags on any noted one; every tag on a biome; a material, an enchantment, a trade; and on a player, `uuid`, `name`, `is_online`, op/whitelist/ban status, first- and last-played times, chat history, and what the player is being shown that isn't really there - fake blocks, fake entities and their own disguise.
 
-A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back an object the queue is already holding. Only reading *from* that object goes to the main thread.
+A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back an object the queue is already holding. Only reading *from* that object goes to the main thread. The same applies at the other end: a tag can be free while what it returns is not, so adding one more step to the tag pays for that step. Reading a player's disguise costs nothing, and asking the returned entity anything at all is a crossing.
 
 ### Not safe (handed to the main thread, script waits)
 
@@ -89,7 +89,7 @@ Implementations mark these; in Denizen they are `narrate`, `actionbar`, `announc
 
 Being safe off the main thread is strictly better than being handed over, and it is checked first - so for the four listed as safe above, this only ever applies to a line they exclude. `announce ... to_permission:<node>` is such a line and is still handed over this way; `narrate`/`actionbar` with `per_player` are excluded from both, and go over with the script waiting.
 
-A command that builds its arguments and its execution into one generated step (`autoCompile`) cannot be handed over this way, since there is nothing left to split - that is what rules out `chat`, `blockcrack` and `tablist`. It does not stop a command being safe outright, which is the better answer anyway and is how `image`, `draw` and `title` avoid the wait instead.
+A command that builds its arguments and its execution into one generated step (`autoCompile`) cannot be handed over this way, since there is nothing left to split - that is what rules out `chat`, `blockcrack`, `tablist`, `fakespawn` and `bossbar`. It does not stop a command being safe outright, which is the better answer anyway and is how `image`, `draw` and `title` avoid the wait instead.
 
 A line is **not** handed over this way if the script is waiting for it anyway - `~`, a `save:` argument, or an `if:` argument - or if the command says this particular line can't be (for example `narrate ... per_player`, which has to parse its text once per target at the exact moment it sends).
 
@@ -111,14 +111,16 @@ A line is **not** handed over this way if the script is waiting for it anyway - 
 # 20 crossings - one per pass, for the tag.
 - async:
     - repeat 20:
-        - narrate "hi <player.name>"
+        - narrate "hp: <player.health>"
 
-# 1 crossing - the name is read once, before the loop.
-- define name <player.name>
+# 1 crossing - the health is read once, before the loop.
+- define hp <player.health>
 - async:
     - repeat 20:
-        - narrate "hi <[name]>"
+        - narrate "hp: <[hp]>"
 ```
+
+Judge a tag by what it reads, not by how it looks. `<player.name>` and `<player.uuid>` cost nothing at all, because the engine keeps both itself; `<player.health>` asks the live entity every single time. The `narrate` lines here are free either way - it is the tag inside them that is being paid for.
 
 **A loop of effects costs nothing:**
 
@@ -129,6 +131,8 @@ A line is **not** handed over this way if the script is waiting for it anyway - 
         - playeffect effect:flame at:<[loc]> quantity:3
         - playsound <[loc]> sound:block_note_block_hat
 ```
+
+Neither line makes the script wait: both are fire-and-forget. Naming who should see the particles - `targets:<player>` - goes one better and keeps the whole of `playeffect` off the main thread, since it no longer has to look up who is near enough.
 
 **Slow data work, then use the result:**
 
@@ -142,12 +146,14 @@ A line is **not** handed over this way if the script is waiting for it anyway - 
 **Background work you collect later:**
 
 ```
-- async detached save:bg:
+- async detached copy_defs:data save:bg:
     - define report <[data].parse_tag[<[parse_value].to_titlecase>]>
 # ... other work happens here, in parallel ...
 - waituntil rate:1t max:30s <entry[bg].created_queue.state.equals[unknown]>
 - narrate <[report]>
 ```
+
+A detached block runs alongside the script, so the two cannot share one set of definitions - it starts from a deep copy of everything the queue holds. `copy_defs:` names the ones it actually needs and skips the rest, which is what makes this affordable inside a loop. What the block writes is merged back either way, once it finishes - which is why the `waituntil` above is what makes `<[report]>` safe to read, and why a plain `wait` is not.
 
 **What not to do** - this is slower than not using async at all:
 
@@ -157,7 +163,7 @@ A line is **not** handed over this way if the script is waiting for it anyway - 
         - teleport <[p]> <[p].location.above[10]>
 ```
 
-Every line here reads or changes the live world, so the block does nothing but pay for hand-offs.
+The list of players is free, but each pass then reads a live location and moves a player - two crossings per player, for work that has to happen on the main thread anyway. The block pays for hand-offs and gains nothing.
 
 ### Measuring
 
