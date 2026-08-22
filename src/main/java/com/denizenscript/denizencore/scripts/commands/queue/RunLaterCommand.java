@@ -31,6 +31,27 @@ public class RunLaterCommand extends AbstractCommand {
         setRequiredArguments(2, -1);
         setPrefixesHandled("id");
         allowedDynamicPrefixes = true;
+        // Not async-safe, and deliberately not: the three future-run buckets and the id map below are plain lists and a plain map, which the
+        // main thread walks every tick to reorganise, fire and persist. Making them concurrent to save a command that hands nothing back
+        // would be a rewrite of a disk-backed structure for no gain the script can see.
+        // Deferring costs none of that. The schedule stays main-thread-only, and the async script stops paying a tick to add to it - which is
+        // the whole of what it was waiting for. The one visible difference is that 'executeAt' is measured when the main thread picks the
+        // command up rather than when the script asked, so a delay can land a tick or two late; against a delay measured in seconds, and
+        // against the tick the script would otherwise have spent waiting, that is not a cost.
+        setAsyncDeferrable(true);
+    }
+
+    /**
+     * Excludes the 'id:' form - see {@link #RunLaterCommand()} for why the rest defers.
+     * <p>
+     * 'id' is a handled prefix, so it is the one argument parseArgs leaves alone: execute reads it through argForPrefixAsElement, which parses
+     * the tag inside it at that moment. Deferred, that moment is on the main thread a tick later, so '- runlater ... id:<[name]>' would read a
+     * definition the script has since moved past - the exact thing deferral is not allowed to do. Every other argument is filled by parseArgs,
+     * which under deferral still runs on the script's own thread, at the line the script wrote.
+     */
+    @Override
+    public boolean isAsyncDeferrable(ScriptEntry scriptEntry) {
+        return !scriptEntry.hasRawArgumentPrefix("id");
     }
 
     // <--[command]
