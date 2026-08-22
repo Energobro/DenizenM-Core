@@ -75,7 +75,7 @@ A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back
 
 ### Not safe (handed to the main thread, script waits)
 
-**Commands** - anything that changes or reads the live server: `adjust`, `note`, `run` (without `async`), `runlater`, `queue`, `mongo`, `reload`, `reflectionset`, and `customevent`, plus every world-touching command an implementation adds (teleport, spawn, give, ...).
+**Commands** - anything that changes or reads the live server: `adjust`, `note`, `run` (without `async`), `queue`, `mongo`, `reload`, `reflectionset`, and `customevent`, plus every world-touching command an implementation adds (teleport, spawn, give, ...). `runlater` belongs here too, but the script does not actually wait on it - see fire-and-forget below.
 
 `customevent` is the one there worth a word, since it looks like pure logic: what it fires is arbitrary user script run inline on the firing thread, so being safe here would turn one crossing into one per main-thread line of every handler - and its own source records two further reasons. `mongo` is listed here because it has not been tested off-thread, not because anything was found wrong with it - its own I/O already runs on a separate thread either way, so `~mongo` does not block the main thread regardless. `sql` and `redis` are built the same way and have since been marked safe: their threading has been measured off-thread (no hand-offs, and a failed connect releases its queue from the worker rather than hanging it), while the round trip of real query results is still waiting on a test against a live database.
 
@@ -85,9 +85,11 @@ A tag base written on its own - `<player>`, `<npc>` - is free too: it hands back
 
 Some commands only send something out and never report anything back. Those are handed over *without* the script waiting: their arguments, including all tags, are read on the script's own thread at the moment the script reaches the line, and only the sending is left for the main thread. The script carries on immediately, and deferred commands keep the order the script wrote them in.
 
-Implementations mark these; in Denizen they are `narrate`, `actionbar`, `announce`, `playsound`, `playeffect`, `showfake`, `debugblock`, `toast`, `compass`, `fakeequip` and `sidebar`.
+In core that is `runlater`, and implementations mark their own; in Denizen they are `narrate`, `actionbar`, `announce`, `playsound`, `playeffect`, `showfake`, `debugblock`, `toast`, `compass`, `fakeequip` and `sidebar`.
 
-Being safe off the main thread is strictly better than being handed over, and it is checked first - so for the ones listed as safe above, this only ever applies to a line they exclude. `announce ... to_permission:<node>` is such a line and is still handed over this way; `narrate`/`actionbar`/`sidebar` with `per_player` are excluded from both, and go over with the script waiting.
+`runlater` is the odd one of that list, since it sends nothing to anyone - what makes it fit is that it hands nothing back either. It only adds to a schedule the main thread walks every tick, and the schedule is three plain lists and a map that get reorganised and written to disk from there; making those concurrent to save a command no script reads from would be a rewrite for a gain nobody can see. Handing it over costs none of that. The one difference worth knowing is that the delay is measured from when the main thread picks the command up, not from when the script asked - a tick or two, against a delay written in seconds. `runlater ... id:<...>` is excluded and still waits: `id` is the one argument the command reads for itself rather than up front, so its tags would be read at the handed-over moment instead of the line the script wrote.
+
+Being safe off the main thread is strictly better than being handed over, and it is checked first - so for the ones listed as safe above, this only ever applies to a line they exclude. It does not apply to `runlater`, which is never safe. `announce ... to_permission:<node>` is such a line and is still handed over this way; `narrate`/`actionbar`/`sidebar` with `per_player` are excluded from both, and go over with the script waiting.
 
 A command that builds its arguments and its execution into one generated step (`autoCompile`) cannot be handed over this way, since there is nothing left to split - that is what rules out `chat`, `blockcrack`, `tablist`, `fakespawn` and `bossbar`. It does not stop a command being safe outright, which is the better answer anyway and is how `image`, `draw` and `title` avoid the wait instead.
 
