@@ -16,6 +16,13 @@ public class DebugInvalidCommand extends AbstractCommand {
         setSyntax("");
         setRequiredArguments(0, Integer.MAX_VALUE);
         isProcedural = true;
+        // Never registered under a name (see CommandRegistry), but ScriptEntry hands entries to it for two cases: a command that isn't in the
+        // registry at all, and a real command written with the wrong number of arguments. Both are reachable from an async script, and both
+        // would otherwise stall it a tick each - a typo inside a 'repeat 1000' costing fifty seconds of main thread to say so a thousand times.
+        // Nothing here needs the main thread: the registry is filled at startup and only read afterwards, the entry internals are already
+        // isolated for anything running off-thread (ScriptEngine.prepareEntry), and the re-injection goes into this queue's own entry list,
+        // from the thread running that queue.
+        asyncSafe = true;
     }
 
     @Override
