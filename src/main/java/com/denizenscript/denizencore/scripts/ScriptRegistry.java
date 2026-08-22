@@ -19,9 +19,14 @@ public class ScriptRegistry {
     /**
      * All loaded script containers, by lowercased name.
      * Concurrent, as this is read off the main thread: by script tags, by 'run', and by 'inject' reading its own arguments.
-     * A script reload still empties and refills it in place, so a script read during a reload may briefly come back missing - the same caveat as any other reloadable registry.
+     * <p>
+     * Volatile and replaced whole by {@link #buildCoreYamlScriptContainers}, never emptied in place. A reload has to look atomic from another
+     * thread for the same reason it already does from the main one: the clear-and-refill runs inside a single main thread task that never yields,
+     * so a main thread script cannot catch it half done - it sees all of the old scripts or all of the new ones. An async queue runs alongside
+     * that task, so without the swap it could read the registry mid-refill and be told a script that plainly exists does not
+     * (a '<script[...]>' answering null, a 'run' or 'inject' failing to find its target), for the couple hundred milliseconds a reload takes.
      */
-    public static Map<String, ScriptContainer> scriptContainers = new ConcurrentHashMap<>();
+    public static volatile Map<String, ScriptContainer> scriptContainers = new ConcurrentHashMap<>();
     public static Map<String, MethodHandle> typeConstructors = new HashMap<>();
 
     public static void _registerType(String typeName, Class<? extends ScriptContainer> scriptContainerClass) {
@@ -60,6 +65,11 @@ public class ScriptRegistry {
     }
 
     public static void attemptLoadSingle(YamlConfiguration script, String scriptName, boolean shouldErrorOnType) {
+        attemptLoadSingle(script, scriptName, shouldErrorOnType, scriptContainers);
+    }
+
+    /** As {@link #attemptLoadSingle(YamlConfiguration, String, boolean)}, but loading into a given map - used to build a reload's set before publishing it. */
+    public static void attemptLoadSingle(YamlConfiguration script, String scriptName, boolean shouldErrorOnType, Map<String, ScriptContainer> target) {
         // Make sure the script has a type
         String type = script.getString("type");
         if (type == null) {
@@ -85,11 +95,11 @@ public class ScriptRegistry {
         }
         try {
             String nameLow = CoreUtilities.toLowerCase(scriptName);
-            if (scriptContainers.containsKey(nameLow)) {
+            if (target.containsKey(nameLow)) {
                 Debug.echoError("Duplicate script name '<Y>" + scriptName + "<W>'");
             }
             ScriptContainer instance = (ScriptContainer) constructor.invoke(script, scriptName);
-            scriptContainers.put(nameLow, instance);
+            target.put(nameLow, instance);
         }
         catch (Throwable ex) {
             Debug.echoError(ex);
@@ -98,9 +108,13 @@ public class ScriptRegistry {
     }
 
     public static void buildCoreYamlScriptContainers(List<YamlConfiguration> yamlScripts) {
-        scriptContainers.clear();
+        // Built aside and published with the single write at the end, so that a reader on another thread never sees a partly filled registry - see the field.
+        // The implementation's own script maps below are still cleared and refilled in place, which is fine: everything that reads them
+        // (item, inventory, entity and command scripts) is main-thread-only anyway, so nothing can look at them during this.
+        Map<String, ScriptContainer> newContainers = new ConcurrentHashMap<>();
         DenizenCore.implementation.refreshScriptContainers();
         if (yamlScripts == null) {
+            scriptContainers = newContainers;
             return;
         }
         Debug.log("Loading <A>" + yamlScripts.size() + "<W> script files...");
@@ -111,10 +125,11 @@ public class ScriptRegistry {
                     Debug.echoError("Invalid container '" + key.str + "' in file '" + ScriptHelper.getSource(key.low) + "' - missing contents?");
                 }
                 else {
-                    attemptLoadSingle(container, key.str, false);
+                    attemptLoadSingle(container, key.str, false, newContainers);
                 }
             }
         }
+        scriptContainers = newContainers;
     }
 
     public static <T extends ScriptContainer> T getScriptContainerAs(String name, Class<T> type) {
