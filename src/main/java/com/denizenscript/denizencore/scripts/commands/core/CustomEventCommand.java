@@ -17,6 +17,15 @@ public class CustomEventCommand extends AbstractCommand {
         setSyntax("customevent [id:<id>] (context:<map>)");
         setRequiredArguments(1, 2);
         isProcedural = false;
+        // Deliberately left main-thread-only, and it is not a close call - three separate reasons, any one of them enough:
+        // - CustomScriptEvent.runCustomEvent fills the shared static 'instance' (id, contextData, entryData, cancelled) and only then clones it
+        //   inside fire(). Two threads firing at once would overwrite each other between the fill and the clone, and a handler would be handed
+        //   somebody else's id or context. Same shape as the actionbar packet handler, which is why that one hops to the main thread.
+        // - What this fires is arbitrary user script, run inline on whichever thread fired it. Today the command costs exactly one crossing;
+        //   async-safe it would cost one per main-thread line of every handler, and there is no way to know what is in them before firing.
+        //   That is the 'per_player' trap again, only worse - there at least the number of targets is visible on the line.
+        // - It cannot be deferred either: the script reads 'any_ran', 'was_cancelled' and 'determination_list' off this entry immediately after,
+        //   so it has to wait for the result by definition.
         autoCompile();
     }
 
