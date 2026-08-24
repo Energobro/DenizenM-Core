@@ -26,8 +26,21 @@ public class AsyncQueue extends TimedQueue {
     /** Every async queue that currently has a live worker thread. */
     public static final Set<AsyncQueue> runningQueues = ConcurrentHashMap.newKeySet();
 
-    /** The thread currently running this queue, or null if the worker isn't live (not started yet, or already finished). */
+    /** The thread currently running this queue, or null if the worker isn't live - not started yet, already finished, or dispatched but not picked up yet (see {@link #workerDispatched}). */
     public volatile Thread ownerThread = null;
+
+    /**
+     * True from the moment a worker is handed to the executor until that worker has finished.
+     * <p>
+     * {@link #ownerThread} alone cannot answer whether a worker is live: it is set by the worker itself, as its first line, so between the
+     * dispatch and that line the field is still null while a worker is very much on its way. Without this, {@link #isOnOwnerThread} tells whoever
+     * is asking that they own the queue, and another thread can stop it - on itself - while the worker is starting up.
+     * <p>
+     * Only ever set on the branch of {@link #onStart} that actually dispatches a worker. The branches that fall back to the main thread
+     * (async disabled in config, or the queue count limit reached) must leave it false: a queue running on the main thread has no worker to
+     * drain {@link #pendingTasks}, so marking it would send handed-over work into a box nobody empties.
+     */
+    public volatile boolean workerDispatched = false;
 
     /** Set true to ask the worker loop to end at the earliest opportunity (used by shutdown). */
     public volatile boolean abandoned = false;
@@ -68,8 +81,14 @@ public class AsyncQueue extends TimedQueue {
     @Override
     public boolean isOnOwnerThread() {
         Thread owner = ownerThread;
-        // A null owner means no worker is live yet (or it already finished), so whichever thread is asking is free to act on the queue directly.
-        return owner == null || Thread.currentThread() == owner;
+        if (owner != null) {
+            return Thread.currentThread() == owner;
+        }
+        // No owner set means one of two very different things. Either no worker was ever dispatched - a queue not started yet, or one that fell
+        // back to the main thread - and then whichever thread is asking is free to act on the queue directly. Or a worker was dispatched and has
+        // not reached its first line yet, and then the asking thread must not act, because it would be acting alongside a worker that is about
+        // to run this queue. Handing the work over instead costs nothing there: draining pendingTasks is the first thing the worker does.
+        return !workerDispatched;
     }
 
     @Override
@@ -108,7 +127,20 @@ public class AsyncQueue extends TimedQueue {
             super.onStart();
             return;
         }
-        DenizenCore.runAsync(this::runLoop);
+        // Set before the dispatch, not inside the worker: from here until that worker ends, this queue belongs to it, and isOnOwnerThread must
+        // say so even in the moment before the worker has run its first line.
+        workerDispatched = true;
+        try {
+            DenizenCore.runAsync(this::runLoop);
+        }
+        catch (Throwable ex) {
+            // The executor only refuses after a shutdown (or when a thread cannot be created at all). Clear the mark first: leaving it set on a
+            // queue with no worker would send everything handed over into pendingTasks, where nothing would ever drain it.
+            workerDispatched = false;
+            Debug.echoError("Could not start a thread for async queue '" + debugId + "' - running it on the main thread instead:");
+            Debug.echoError(ex);
+            super.onStart();
+        }
     }
 
     /** Whether the count warning has already been given, so that a busy server gets it once rather than on every queue it starts. */
@@ -143,7 +175,13 @@ public class AsyncQueue extends TimedQueue {
             runningQueues.remove(this);
             // Any tasks still pending would never run otherwise (eg a stop request that arrived while the loop was ending).
             runPendingTasks();
+            // Both cleared together, and only after that last drain: from here the queue has no worker, so another thread asking to act on it
+            // is answered yes and does so itself. Note what is deliberately NOT fixed here - a task handed over in the instant between the drain
+            // above and these two lines lands in pendingTasks with nobody left to empty it. Closing that needs a lock around the whole handover,
+            // and the only caller that can reach it is a detached block merging its definitions into a queue that has already finished, ie work
+            // with nothing left to affect. A lock on the queue lifecycle is a worse thing to own than that.
             ownerThread = null;
+            workerDispatched = false;
             if (!isStopped) {
                 try {
                     stop();
