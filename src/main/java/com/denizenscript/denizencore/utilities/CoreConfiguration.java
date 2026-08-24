@@ -68,6 +68,20 @@ public class CoreConfiguration {
     public static long mainThreadTaskBudgetMillis = 5;
 
     /**
+     * Once the main thread has answered everything async scripts were waiting on, keep watching this many microseconds longer in case another
+     * request arrives. Set to 0 to hand the tick back the moment the queue is empty.
+     * <p>
+     * An async script's requests come back to back: the instant one is answered the script runs on, and a few dozen microseconds later it asks
+     * for the next one. Without this it has just missed its drain and waits for the following tick, which is why a chain of requests used to cost
+     * one tick each however small they were - and why a script that reads a live value inside a loop gained nothing from being async at all.
+     * <p>
+     * Worth being clear about what this spends. The requests themselves are work the main thread was going to do anyway, one tick later; all that
+     * changes is when it does them. What is genuinely added is the watching - at most this many microseconds at the end of a chain, and only on
+     * ticks where an async script asked for something at all. An idle server pays one comparison.
+     */
+    public static long mainThreadWaitLingerMicros = 500;
+
+    /**
      * Warn once when this many async queues are running at the same time. Set to 0 to never warn.
      * <p>
      * Each async queue owns a thread for its whole life, including while it sits in a 'wait', so a script that starts them in bulk

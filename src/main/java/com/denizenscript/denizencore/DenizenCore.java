@@ -382,6 +382,53 @@ public class DenizenCore {
         }
     }
 
+    /** Ceiling on one pass of {@link #lingerForFollowUpRequests()}, so a script asking in a tight loop cannot hold the tick open indefinitely. */
+    private static final long LINGER_HARD_CAP_NANOS = 5_000_000L;
+
+    /** How many empty polls to spin through before yielding once, so that on a box with few cores the thread being waited for can actually run. */
+    private static final int SPINS_PER_YIELD = 64;
+
+    /**
+     * Waits a moment for an async script's next request, answers it, and keeps going until nothing more arrives in time.
+     * <p>
+     * Requests arrive back to back, so the one that follows an answer is usually microseconds behind it - and without this it would miss the
+     * drain it just missed by nothing and wait for the next tick. See {@link CoreConfiguration#mainThreadWaitLingerMicros} for what it costs.
+     * Each answer restarts the window, so a script working through a chain keeps its turn, but never past the hard cap above.
+     */
+    private static void lingerForFollowUpRequests() {
+        long linger = CoreConfiguration.mainThreadWaitLingerMicros * 1000L;
+        if (linger <= 0) {
+            return;
+        }
+        long start = System.nanoTime();
+        long hardEnd = start + LINGER_HARD_CAP_NANOS;
+        long deadline = start + linger;
+        int spins = 0;
+        while (true) {
+            Runnable task = mainThreadWaitingTasks.poll();
+            if (task != null) {
+                runMainThreadTask(task);
+                long after = System.nanoTime();
+                if (after >= hardEnd) {
+                    return;
+                }
+                deadline = Math.min(after + linger, hardEnd);
+                spins = 0;
+                continue;
+            }
+            if (System.nanoTime() >= deadline) {
+                return;
+            }
+            if (++spins >= SPINS_PER_YIELD) {
+                spins = 0;
+                Thread.yield();
+            }
+            else {
+                Thread.onSpinWait();
+            }
+        }
+    }
+
     /**
      * Processes the tasks that other threads have requested to be run on the main thread. Called automatically per-tick.
      * <p>
@@ -395,8 +442,13 @@ public class DenizenCore {
     /** As {@link #runMainThreadTasks()}, with an explicit budget in milliseconds - 0 for "everything, however much there is". */
     public static void runMainThreadTasks(long budgetMillis) {
         Runnable task;
+        boolean answeredAny = false;
         while ((task = mainThreadWaitingTasks.poll()) != null) {
             runMainThreadTask(task);
+            answeredAny = true;
+        }
+        if (answeredAny) {
+            lingerForFollowUpRequests();
         }
         if (budgetMillis <= 0) {
             while ((task = mainThreadTasks.poll()) != null) {
