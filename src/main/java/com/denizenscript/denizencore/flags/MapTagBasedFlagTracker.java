@@ -8,6 +8,7 @@ import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 
+import java.lang.invoke.VarHandle;
 import java.util.List;
 import java.util.Map;
 
@@ -205,6 +206,7 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
      * so the write is one value replacement and no map along the way changes shape.
      * That is what makes it safe against a reader on another thread - replacing the value of a key that is already present
      * neither resizes the map nor bumps its modification count, so a walk in progress cannot notice.
+     * That covers the shape of the map; what makes the new value itself safe for that reader to see is the fence below.
      * Returns false when anything about the path has to change, leaving the caller to rebuild it instead.
      */
     public boolean setDeepFlagInPlace(List<String> splitKey, MapTag resultMap) {
@@ -239,6 +241,11 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
         if (!map.containsKey(endKey)) {
             return false;
         }
+        // The value was built outside the write lock, and this is a plain store into a map that is already published - a reader that took
+        // the root before the setRootMap below is walking this tree with plain reads, and gets no happens-before from that write.
+        // The fence puts every store that built resultMap ahead of the store of the reference to it, so such a reader sees either the
+        // old value or a fully built new one, never a half-written map. Free on x86, one instruction on the ARM hosts this may run on.
+        VarHandle.releaseFence();
         map.putObject(endKey, resultMap);
         setRootMap(splitKey.get(0), rootMap);
         return true;
