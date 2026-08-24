@@ -18,11 +18,13 @@ This fork can run script queues on a thread other than the server's main thread,
 
 ### The one rule
 
-**Crossing between an async script and the main thread costs up to a full tick, every time.**
+**The first crossing between an async script and the main thread costs up to a full tick. The ones behind it cost microseconds.**
 
 Async moves CPU work. It does not move memory (garbage collection is shared and stop-the-world) and it does not move world access. Every command or tag that isn't safe off-thread is automatically handed to the main thread, and the script waits there - so scripts stay correct, they just gain nothing from those lines.
 
-The win therefore comes from having *fewer* crossings, never from cheaper ones. Read live state before you go async, and keep only data processing inside.
+What the waiting costs depends on where the request lands. The main thread serves these between its other work, so the first one waits for that moment to come round, which is up to a tick. Having served one, though, it does not leave straight away - it watches a moment longer, and an async script's requests arrive back to back, so the rest of a run of them are answered in microseconds. Measured on a live server: a hundred live reads in a row cost 3.7 seconds before that existed, and between one and forty-five milliseconds after - the spread being what happens when a long run outlives one pass and waits for the next.
+
+The win still comes from having *fewer* crossings, and reading live state before you go async is still the shape to aim for. What changed is the price of getting it wrong: a loop reading one live value per pass used to cost a tick per pass, which made it slower async than plain. It now costs the main thread the work it always did, and the script the time to ask.
 
 ### Starting async work
 
@@ -182,13 +184,16 @@ Scripts:
         Main thread wait timeout: 15s  # how long an async script waits for the main thread before erroring
         Shutdown timeout: 3s           # how long shutdown waits for async queues to finish
         Main thread task budget ms: 5  # per tick, for work handed over without waiting; 0 for no budget
+        Main thread wait linger us: 500 # how long the main thread keeps watching for the next request after answering one; 0 to answer once per tick
         Warn at queue count: 50        # warn once when this many async queues are live; 0 to never warn
         Max queue count: 256           # past this, a new async queue runs on the main thread instead; 0 for no limit
 ```
 
 Each async queue owns a thread for its whole life, including while it sits in a `wait`. Starting them in a loop quietly turns into that many threads; the engine warns once when a lot are live at the same time, and past the maximum a new one simply runs on the main thread rather than adding another thread. Prefer one queue that processes a list.
 
-Work an async script hands over *without* waiting - deferred commands, debug output - is budgeted per tick, because a script can produce it faster than the main thread can run it. The script never waits on any of it, so the budget costs it nothing; it only spreads the delivery. Requests a script is actually waiting on are never budgeted, and are always run ahead of the rest.
+Work an async script hands over *without* waiting - deferred commands, debug output - is budgeted per tick, because a script can produce it faster than the main thread can run it. The script never waits on any of it, so the budget costs it nothing; it only spreads the delivery.
+
+Requests a script *is* waiting on go the other way round: never budgeted, always served first, and the main thread does not leave the instant it has answered them. It keeps watching for `Main thread wait linger us`, because the script's next request is usually microseconds behind its last one, and without that pause it would miss its turn and wait for the following tick - which is what used to make a loop reading one live value per pass cost a tick per pass. Every answer restarts the window, so a run of requests is served in one go, and a hard limit of 5ms per pass stops a script that asks in a tight loop from holding the tick open. Set it to 0 to go back to answering once per tick.
 
 **One thing off-thread scripts do not get:** reading another queue's definitions - `<queue[some_id].definition[x]>` - while that queue is running off-thread has no guarantees. Definitions are an ordinary ordered map, and making it otherwise would cost every definition read in every script to protect an unusual one. Read your own definitions freely; to get a value out of a queue you don't own, have it write a flag or use `- async:`'s own definition merging.
 
