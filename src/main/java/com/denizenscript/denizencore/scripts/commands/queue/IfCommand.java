@@ -102,8 +102,15 @@ public class IfCommand extends BracedCommand {
     public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
         boolean has_brace = scriptEntry.getInsideList() != null;
         if (has_brace) {
+            // 'false' - the body is NOT cloned here. parseArgs runs on every execution, and cloning every line of every branch before the
+            // condition has even been read costs a ScriptEntry clone per line whether that branch runs or not. execute clones the one branch
+            // it picks, through BracedCommand.duplicateBracedSection.
+            // 'args' is still rebuilt per execution, and must be: execute hands a subList of it to ArgComparer, which rewrites the list it is
+            // given while crunching parentheses - so a shared copy would be corrupted by the first else-if that uses them.
             List<BracedData> allData = new ArrayList<>();
-            BracedData ifRef = getBracedCommands(scriptEntry).get(0);
+            BracedData ifRef = new BracedData();
+            ifRef.entry = scriptEntry;
+            ifRef.value = getBracedCommands(scriptEntry, false).get(0).value;
             ifRef.key = scriptEntry.toString();
             ifRef.args = new ArrayList<>();
             ifRef.args.add("if");
@@ -122,7 +129,8 @@ public class IfCommand extends BracedCommand {
                 nextEntry.context = scriptEntry.context;
                 nextEntry.entryData = scriptEntry.entryData;
                 nextEntry.queue = scriptEntry.queue;
-                BracedData elseRef = getBracedCommands(nextEntry).get(0);
+                BracedData elseRef = new BracedData();
+                elseRef.value = getBracedCommands(nextEntry, false).get(0).value;
                 elseRef.entry = nextEntry;
                 elseRef.key = nextEntry.toString();
                 elseRef.args = new ArrayList<>();
@@ -143,7 +151,7 @@ public class IfCommand extends BracedCommand {
                 }
             }
             if (has_brace) {
-                scriptEntry.addObject("braces", getBracedCommands(scriptEntry));
+                scriptEntry.addObject("braces", getBracedCommands(scriptEntry, false));
             }
         }
         boolean in_subcommand = false;
@@ -214,8 +222,12 @@ public class IfCommand extends BracedCommand {
                     Debug.log("Running the first set");
                 }
                 Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
+                List<ScriptEntry> bracedCommandsList = duplicateBracedSection(braces.get(0), braces.get(0).entry);
+                if (bracedCommandsList == null) {
+                    Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
+                    return;
+                }
                 scriptEntry.setInstant(true);
-                List<ScriptEntry> bracedCommandsList = braces.get(0).value;
                 for (ScriptEntry entry : bracedCommandsList) {
                     entry.setInstant(true);
                 }
@@ -246,8 +258,12 @@ public class IfCommand extends BracedCommand {
                     else {
                         Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, running ELSE block.");
                     }
+                    List<ScriptEntry> bracedCommandsList = duplicateBracedSection(braceSet, braceSet.entry);
+                    if (bracedCommandsList == null) {
+                        Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
+                        return;
+                    }
                     scriptEntry.setInstant(true);
-                    List<ScriptEntry> bracedCommandsList = braceSet.value;
                     for (ScriptEntry entry : bracedCommandsList) {
                         entry.setInstant(true);
                     }

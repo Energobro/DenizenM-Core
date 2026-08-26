@@ -718,7 +718,10 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
                 internal.actualCommand = CommandRegistry.debugInvalidCommand;
             }
             if (internal.actualCommand instanceof BracedCommand) {
-                BracedCommand.getBracedCommands(this);
+                // 'false' because the return value is thrown away: this call exists to build and cache the braced set, and duplicating it
+                // clones every line of the body only to drop the copies. Entries are built recursively, so a nested block paid that at
+                // every level.
+                BracedCommand.getBracedCommands(this, false);
             }
             if (internal.actualCommand.generatedExecutor != null) {
                 for (CommandExecutionGenerator.ArgData arg : internal.actualCommand.generatedExecutor.args) {
