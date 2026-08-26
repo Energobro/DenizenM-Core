@@ -594,21 +594,19 @@ public class ListTag implements List<String>, ObjectTag {
         return results;
     }
 
-    private static HashSet<String> deduplicateHelper = new HashSet<>();
-
     public ListTag deduplicate() {
-        deduplicateHelper.clear();
+        // Local, not a shared static scratch set: ListTag carries no main-thread marking, so two scripts can be in here at once on different
+        // threads, clearing and filling the same set out from under each other. One allocation is nothing against the loop that follows.
         int size = size();
+        HashSet<String> seen = new HashSet<>(size);
         ListTag list = new ListTag(size);
         for (int i = 0; i < size; i++) {
             ObjectTag obj = objectForms.get(i);
             String entry = CoreUtilities.toLowerCase(String.valueOf(obj));
-            if (!deduplicateHelper.contains(entry)) {
+            if (seen.add(entry)) {
                 list.addObject(obj);
-                deduplicateHelper.add(entry);
             }
         }
-        deduplicateHelper.clear();
         return list;
     }
 

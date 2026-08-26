@@ -12,7 +12,10 @@ import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 public class JavaReflectedObjectTag implements ObjectTag {
@@ -60,11 +63,11 @@ public class JavaReflectedObjectTag implements ObjectTag {
         return string.startsWith("reflected@");
     }
 
-    public static HashMap<UUID, JavaReflectedObjectTag> persistedReferences = new HashMap<>();
+    // Concurrent: this type carries no main-thread marking, so a reflected-object tag read from an async script lands here beside whatever the
+    // main thread is doing - and the old plain HashMap was both written and iterated at once.
+    public static Map<UUID, JavaReflectedObjectTag> persistedReferences = new ConcurrentHashMap<>();
 
-    private static ArrayList<UUID> toRemoveHelper = new ArrayList<>();
-
-    public static long lastCleared;
+    public static volatile long lastCleared;
 
     public static long clearRateSeconds = 60;
 
@@ -74,13 +77,16 @@ public class JavaReflectedObjectTag implements ObjectTag {
             return;
         }
         lastCleared = time;
+        // The list of what to drop is local. As a static it was shared between threads and, worse, never cleared - so it grew without bound and
+        // re-removed everything it had ever held on every pass.
+        List<UUID> toRemove = new ArrayList<>();
         for (JavaReflectedObjectTag ref : persistedReferences.values()) {
             if (ref.lastIdentified + clearRateSeconds * 1000 < time) {
-                toRemoveHelper.add(ref.id);
+                toRemove.add(ref.id);
             }
         }
-        for (UUID toRemove : toRemoveHelper) {
-            persistedReferences.remove(toRemove);
+        for (UUID id : toRemove) {
+            persistedReferences.remove(id);
         }
     }
 
