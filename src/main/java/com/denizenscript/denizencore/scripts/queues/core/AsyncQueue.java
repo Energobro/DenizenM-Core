@@ -68,9 +68,21 @@ public class AsyncQueue extends TimedQueue {
         return "AsyncQueue";
     }
 
+    /**
+     * Set when {@link #onStart} folded this queue onto the main thread instead of giving it a worker - async switched off in config, the queue
+     * count limit reached, or the executor refusing the task.
+     * <p>
+     * Kept as the inverse ("was it folded?") rather than the positive ("does it own a thread?") so that a queue which has not started yet, and one
+     * that has already finished, both still answer the way they always have. Only the folded ones change their answer.
+     */
+    public volatile boolean foldedToMainThread = false;
+
     @Override
     public boolean isAsync() {
-        return true;
+        // Not a constant true: this class is still the queue's type after onStart has folded it onto the main thread, and saying "async" there is a
+        // lie with consequences. It makes <@link tag QueueTag.is_async> report a thread the queue does not have, and it makes an '- async:' block
+        // inside such a queue inline itself on the main thread on the grounds that it is "already off-thread".
+        return !foldedToMainThread;
     }
 
     @Override
@@ -112,6 +124,7 @@ public class AsyncQueue extends TimedQueue {
     public void onStart() {
         if (!CoreConfiguration.allowAsyncScripts) {
             Debug.echoDebug(this, "Async scripts are disabled in config - running queue '" + debugId + "' on the main thread instead.");
+            foldedToMainThread = true;
             super.onStart();
             return;
         }
@@ -126,6 +139,7 @@ public class AsyncQueue extends TimedQueue {
                 Debug.echoError(limit + " async script queues are already running, which is the configured limit, so queue '" + debugId
                         + "' is running on the main thread instead. Something is starting async queues in a loop - consider one queue that processes a list.");
             }
+            foldedToMainThread = true;
             super.onStart();
             return;
         }
@@ -149,6 +163,7 @@ public class AsyncQueue extends TimedQueue {
             runningQueues.remove(this);
             Debug.echoError("Could not start a thread for async queue '" + debugId + "' - running it on the main thread instead:");
             Debug.echoError(ex);
+            foldedToMainThread = true;
             super.onStart();
         }
     }
