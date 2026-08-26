@@ -23,7 +23,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
  */
 public class AsyncQueue extends TimedQueue {
 
-    /** Every async queue that currently has a live worker thread. */
+    /** Every async queue that has a worker: from the moment one is handed to the executor until that worker has finished. */
     public static final Set<AsyncQueue> runningQueues = ConcurrentHashMap.newKeySet();
 
     /** The thread currently running this queue, or null if the worker isn't live - not started yet, already finished, or dispatched but not picked up yet (see {@link #workerDispatched}). */
@@ -119,6 +119,8 @@ public class AsyncQueue extends TimedQueue {
         if (limit > 0 && runningQueues.size() >= limit) {
             // Running it on the main thread rather than refusing it: the script still does what it says, it just stops adding threads.
             // A server that reaches this is already in trouble - this only keeps a runaway loop from making it worse.
+            // Two threads starting queues in the same instant can both pass this check and overshoot by one each. Left alone deliberately: the
+            // case this exists to stop is one script's loop, which runs on one thread, and a strict count would cost a lock on every queue start.
             if (!warnedOnLimit) {
                 warnedOnLimit = true;
                 Debug.echoError(limit + " async script queues are already running, which is the configured limit, so queue '" + debugId
@@ -127,16 +129,24 @@ public class AsyncQueue extends TimedQueue {
             super.onStart();
             return;
         }
-        // Set before the dispatch, not inside the worker: from here until that worker ends, this queue belongs to it, and isOnOwnerThread must
-        // say so even in the moment before the worker has run its first line.
+        // Both marks are set before the dispatch, not inside the worker, and for the same reason in two forms.
+        // For workerDispatched: from here until that worker ends, this queue belongs to it, and isOnOwnerThread must say so even in the moment
+        // before the worker has run its first line.
+        // For the count: a script starting queues in a loop starts every one of them inside a single tick, while the workers register themselves
+        // on their own threads whenever the executor gets to them. Counting at that point means the limit above reads a count that has not caught
+        // up yet, and waves through the whole burst it exists to stop - measured as all 40 of 40 let past a limit of 20.
         workerDispatched = true;
+        runningQueues.add(this);
+        checkQueueCount();
         try {
             DenizenCore.runAsync(this::runLoop);
         }
         catch (Throwable ex) {
-            // The executor only refuses after a shutdown (or when a thread cannot be created at all). Clear the mark first: leaving it set on a
-            // queue with no worker would send everything handed over into pendingTasks, where nothing would ever drain it.
+            // The executor only refuses after a shutdown (or when a thread cannot be created at all). Clear both marks first: leaving the flag set
+            // on a queue with no worker would send everything handed over into pendingTasks, where nothing would ever drain it, and leaving the
+            // queue in runningQueues would hold a slot under the limit that nothing will ever give back.
             workerDispatched = false;
+            runningQueues.remove(this);
             Debug.echoError("Could not start a thread for async queue '" + debugId + "' - running it on the main thread instead:");
             Debug.echoError(ex);
             super.onStart();
@@ -152,8 +162,6 @@ public class AsyncQueue extends TimedQueue {
     /** The worker loop. Runs on the async thread for the entire life of the queue. */
     public void runLoop() {
         ownerThread = Thread.currentThread();
-        runningQueues.add(this);
-        checkQueueCount();
         try {
             while (is_started && !isStopped && !abandoned) {
                 runPendingTasks();
