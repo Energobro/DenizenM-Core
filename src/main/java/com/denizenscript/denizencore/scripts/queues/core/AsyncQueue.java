@@ -130,8 +130,9 @@ public class AsyncQueue extends TimedQueue {
     @Override
     public void onStart() {
         if (!CoreConfiguration.allowAsyncScripts) {
-            // debugId carries its own colour codes, so it needs the surrounding colour restored after it - without that the last word of the
-            // queue name paints the rest of the line. Same convention as everywhere else it is spliced in (see ScriptQueue.queueDebug).
+            // debugId carries its own colour codes, so the surrounding colour has to be restored after it, or the last word of the generated
+            // queue name paints the rest of the line. Which code to restore to depends on where the text lands: a debug body is <O> (see
+            // ScriptQueue.queueDebug), and an error body is <W> (DebugInternals.ERROR_HEADER_END). <LR> belongs only inside an error header.
             Debug.echoDebug(this, "Async scripts are disabled in config - running queue '" + debugId + "<O>' on the main thread instead.");
             foldedToMainThread = true;
             super.onStart();
@@ -146,7 +147,7 @@ public class AsyncQueue extends TimedQueue {
             if (!warnedOnLimit) {
                 warnedOnLimit = true;
                 Debug.echoError(limit + " async script queues are already running, which is the configured limit, so queue '" + debugId
-                        + "<LR>' is running on the main thread instead. Something is starting async queues in a loop - consider one queue that processes a list.");
+                        + "<W>' is running on the main thread instead. Something is starting async queues in a loop - consider one queue that processes a list.");
             }
             foldedToMainThread = true;
             super.onStart();
@@ -170,7 +171,7 @@ public class AsyncQueue extends TimedQueue {
             // queue in runningQueues would hold a slot under the limit that nothing will ever give back.
             workerDispatched = false;
             runningQueues.remove(this);
-            Debug.echoError("Could not start a thread for async queue '" + debugId + "<LR>' - running it on the main thread instead:");
+            Debug.echoError("Could not start a thread for async queue '" + debugId + "<W>' - running it on the main thread instead:");
             Debug.echoError(ex);
             foldedToMainThread = true;
             super.onStart();
