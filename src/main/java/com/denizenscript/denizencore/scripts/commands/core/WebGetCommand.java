@@ -195,13 +195,15 @@ public class WebGetCommand extends AbstractCommand implements Holdable {
         fout.close();
     }
 
-    public static boolean patchAlreadyPatched = false;
+    public static volatile boolean patchAlreadyPatched = false;
 
     /**
      * This fixes the methods field in HttpURLConnection class to support the PATCH method.
      * I named this fix method this way because the name deserves to be as stupid as the concept.
      */
-    public static void patchPatchMethodMethodsField() {
+    // Synchronized because webget runs off the main thread and two PATCH requests can arrive together: the flag alone is a check and a set with
+    // a gap between them, and what sits in that gap is a read-modify-write of a JDK static field.
+    public static synchronized void patchPatchMethodMethodsField() {
         if (patchAlreadyPatched) {
             return;
         }

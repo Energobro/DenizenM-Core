@@ -11,15 +11,20 @@ import java.lang.reflect.Modifier;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.stream.Collectors;
 
 public class ReflectionHelper {
 
     public static boolean hasInitialized = false;
 
-    private static final Map<Class<?>, FieldCache> cachedFields = new HashMap<>();
+    // Concurrent, not plain: these are reachable off the main thread. 'webget' is asyncSafe and runs its request on its own thread, and a
+    // 'method:patch' request goes through WebGetCommand.patchPatchMethodMethodsField, which reads a field and builds a final setter - both of
+    // which land here. That can run alongside a main thread reflection lookup (a reflected-object tag, property parsing, tag codegen on a script
+    // reload), and two threads writing a plain HashMap lose entries or corrupt it outright.
+    private static final Map<Class<?>, FieldCache> cachedFields = new ConcurrentHashMap<>();
 
-    private static final Map<Class<?>, Map<String, MethodHandle>> cachedFieldSetters = new HashMap<>();
+    private static final Map<Class<?>, Map<String, MethodHandle>> cachedFieldSetters = new ConcurrentHashMap<>();
 
     public static void echoError(String message) {
         if (hasInitialized) {
@@ -66,21 +71,25 @@ public class ReflectionHelper {
     public static class FieldCache {
 
         public Class<?> clazz;
-        public Field[] allFields;
-        public Map<String, Field> fieldCache = new HashMap<>();
+        public volatile Field[] allFields;
+        public Map<String, Field> fieldCache = new ConcurrentHashMap<>();
 
         public FieldCache(Class<?> clazz) {
             this.clazz = clazz;
         }
 
         public Field[] getAllFields() {
-            if (allFields == null) {
-                allFields = clazz.getDeclaredFields();
-                for (Field field : allFields) {
+            // Read once into a local and publish once at the end. Two threads may both build the array - harmless, it is the same content - but
+            // neither may hand out an array whose fields have not all had setAccessible called yet, which assigning first would allow.
+            Field[] fields = allFields;
+            if (fields == null) {
+                fields = clazz.getDeclaredFields();
+                for (Field field : fields) {
                     field.setAccessible(true);
                 }
+                allFields = fields;
             }
-            return allFields;
+            return fields;
         }
 
         public Field getFirstOfType(Class<?> fieldClazz) {
@@ -259,7 +268,7 @@ public class ReflectionHelper {
     }
 
     public static MethodHandle getFinalSetter(Class<?> clazz, String field, Class<?> expected) {
-        Map<String, MethodHandle> map = cachedFieldSetters.computeIfAbsent(clazz, k -> new HashMap<>());
+        Map<String, MethodHandle> map = cachedFieldSetters.computeIfAbsent(clazz, k -> new ConcurrentHashMap<>());
         MethodHandle result = map.get(field);
         if (result != null) {
             return result;
@@ -317,7 +326,9 @@ public class ReflectionHelper {
         if (result == null) {
             return null;
         }
-        cachedFieldSetters.get(clazz).put(field, result);
+        // Straight back into the map fetched above rather than a second lookup: with two threads in here for the same field both build a valid
+        // handle and the later write wins, which is fine - a second get() on a map another thread could have replaced is not.
+        map.put(field, result);
         return result;
     }
 
