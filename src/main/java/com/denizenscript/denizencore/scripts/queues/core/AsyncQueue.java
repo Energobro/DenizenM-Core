@@ -111,6 +111,13 @@ public class AsyncQueue extends TimedQueue {
         }
         pendingTasks.add(run);
         wake();
+        // Publish, then look again. Between the check above and this add, the worker may have run its last drain and put its marks down - and then
+        // this task would sit in a box nobody is left to empty. The second look is what closes that: either the worker is still live and will take
+        // it, or it has gone, and a queue with no worker is one this thread may act on directly, which is what isOnOwnerThread says a line above.
+        // Both threads reaching the drain at once is fine - runPendingTasks polls, so each task comes out exactly once.
+        if (isOnOwnerThread()) {
+            runPendingTasks();
+        }
     }
 
     @Override
@@ -201,12 +208,13 @@ public class AsyncQueue extends TimedQueue {
             // Any tasks still pending would never run otherwise (eg a stop request that arrived while the loop was ending).
             runPendingTasks();
             // Both cleared together, and only after that last drain: from here the queue has no worker, so another thread asking to act on it
-            // is answered yes and does so itself. Note what is deliberately NOT fixed here - a task handed over in the instant between the drain
-            // above and these two lines lands in pendingTasks with nobody left to empty it. Closing that needs a lock around the whole handover,
-            // and the only caller that can reach it is a detached block merging its definitions into a queue that has already finished, ie work
-            // with nothing left to affect. A lock on the queue lifecycle is a worse thing to own than that.
+            // is answered yes and does so itself.
             ownerThread = null;
             workerDispatched = false;
+            // And one more drain with the marks down, which is the other half of the handover in runOnQueueThread. The two cover the two orders
+            // this can happen in: a task added before the marks came down is taken here, and one added after is run by the thread that added it,
+            // because by then isOnOwnerThread answers yes to whoever asks. Neither needs a lock on the queue's lifecycle to own the gap.
+            runPendingTasks();
             if (!isStopped) {
                 try {
                     stop();
