@@ -879,6 +879,26 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
         });
 
         // <--[tag]
+        // @attribute <util.linger_stats>
+        // @returns MapTag
+        // @description
+        // Returns a map of what the main thread's wait window has cost, with keys 'idle_time' (a DurationTag) and 'count'.
+        // <@link language Async Queues> explains the window itself: after answering an async script's request, the main thread waits a moment
+        // for the next one, because requests arrive back to back and the next is usually microseconds behind.
+        // 'idle_time' is the total time spent waiting after the last answer for a follow-up that never came - the part of the window that bought
+        // nothing. 'count' is how many times the window has been entered since the server started, so the two divide into a cost per entry.
+        // Sample both across a stretch of time and subtract, rather than reading the totals: they only ever grow.
+        // This cannot be seen in TPS. A few milliseconds a tick on a server with headroom costs exactly nothing measurable there, until the day
+        // the tick has no headroom left, so tune 'Main thread wait linger us' against this rather than against TPS.
+        // -->
+        tagProcessor.registerTag(MapTag.class, "linger_stats", (attribute, object) -> {
+            MapTag result = new MapTag();
+            result.putObject("idle_time", new DurationTag(DenizenCore.lingerIdleNanos / 1000000000.0));
+            result.putObject("count", new ElementTag(DenizenCore.lingerCount));
+            return result;
+        });
+
+        // <--[tag]
         // @attribute <util.notes[<type>]>
         // @returns ListTag
         // @description
