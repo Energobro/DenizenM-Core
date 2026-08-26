@@ -69,19 +69,16 @@ public class AsyncQueue extends TimedQueue {
     }
 
     /**
-     * Set when {@link #onStart} folded this queue onto the main thread instead of giving it a worker - async switched off in config, the queue
-     * count limit reached, or the executor refusing the task.
-     * <p>
-     * Kept as the inverse ("was it folded?") rather than the positive ("does it own a thread?") so that a queue which has not started yet, and one
-     * that has already finished, both still answer the way they always have. Only the folded ones change their answer.
+     * Set when {@link #onStart} folded this queue onto the main thread instead of giving it a worker - async off in config, the count limit
+     * reached, or the executor refusing. Kept as the inverse of "owns a thread" so that only folded queues change what {@link #isAsync} answers,
+     * and a queue not started yet or already finished keeps answering as it always did.
      */
     public volatile boolean foldedToMainThread = false;
 
     @Override
     public boolean isAsync() {
-        // Not a constant true: this class is still the queue's type after onStart has folded it onto the main thread, and saying "async" there is a
-        // lie with consequences. It makes <@link tag QueueTag.is_async> report a thread the queue does not have, and it makes an '- async:' block
-        // inside such a queue inline itself on the main thread on the grounds that it is "already off-thread".
+        // Not a constant true: the class is still the queue's type after onStart folded it onto the main thread, and claiming "async" there makes
+        // <@link tag QueueTag.is_async> report a thread that does not exist, and an '- async:' block inline itself as "already off-thread".
         return !foldedToMainThread;
     }
 
@@ -111,10 +108,9 @@ public class AsyncQueue extends TimedQueue {
         }
         pendingTasks.add(run);
         wake();
-        // Publish, then look again. Between the check above and this add, the worker may have run its last drain and put its marks down - and then
-        // this task would sit in a box nobody is left to empty. The second look is what closes that: either the worker is still live and will take
-        // it, or it has gone, and a queue with no worker is one this thread may act on directly, which is what isOnOwnerThread says a line above.
-        // Both threads reaching the drain at once is fine - runPendingTasks polls, so each task comes out exactly once.
+        // Publish, then look again: between the check above and this add, the worker may have drained for the last time and put its marks down,
+        // leaving this task with nobody to run it. Looking again catches that - a queue with no worker is one this thread may drain itself.
+        // Both threads draining at once is fine, since runPendingTasks polls.
         if (isOnOwnerThread()) {
             runPendingTasks();
         }
@@ -142,8 +138,7 @@ public class AsyncQueue extends TimedQueue {
         if (limit > 0 && runningQueues.size() >= limit) {
             // Running it on the main thread rather than refusing it: the script still does what it says, it just stops adding threads.
             // A server that reaches this is already in trouble - this only keeps a runaway loop from making it worse.
-            // Two threads starting queues in the same instant can both pass this check and overshoot by one each. Left alone deliberately: the
-            // case this exists to stop is one script's loop, which runs on one thread, and a strict count would cost a lock on every queue start.
+            // Two threads starting queues at once can each overshoot by one. Left alone: the case worth stopping is one script's loop, on one thread.
             if (!warnedOnLimit) {
                 warnedOnLimit = true;
                 Debug.echoError(limit + " async script queues are already running, which is the configured limit, so queue '" + debugId
@@ -153,12 +148,9 @@ public class AsyncQueue extends TimedQueue {
             super.onStart();
             return;
         }
-        // Both marks are set before the dispatch, not inside the worker, and for the same reason in two forms.
-        // For workerDispatched: from here until that worker ends, this queue belongs to it, and isOnOwnerThread must say so even in the moment
-        // before the worker has run its first line.
-        // For the count: a script starting queues in a loop starts every one of them inside a single tick, while the workers register themselves
-        // on their own threads whenever the executor gets to them. Counting at that point means the limit above reads a count that has not caught
-        // up yet, and waves through the whole burst it exists to stop - measured as all 40 of 40 let past a limit of 20.
+        // Both marks go up before the dispatch, not inside the worker. isOnOwnerThread must say the queue is taken even before the worker's first
+        // line; and the count must include it before the next queue starts, since a script's loop starts them all inside one tick - counting in the
+        // worker let all 40 of 40 past a limit of 20.
         workerDispatched = true;
         runningQueues.add(this);
         checkQueueCount();
@@ -166,9 +158,8 @@ public class AsyncQueue extends TimedQueue {
             DenizenCore.runAsync(this::runLoop);
         }
         catch (Throwable ex) {
-            // The executor only refuses after a shutdown (or when a thread cannot be created at all). Clear both marks first: leaving the flag set
-            // on a queue with no worker would send everything handed over into pendingTasks, where nothing would ever drain it, and leaving the
-            // queue in runningQueues would hold a slot under the limit that nothing will ever give back.
+            // Only reachable after a shutdown, or when no thread can be created. Clear both marks: the flag would send handed-over work into
+            // pendingTasks with no worker to drain it, and the set entry would hold a slot under the limit forever.
             workerDispatched = false;
             runningQueues.remove(this);
             Debug.echoError("Could not start a thread for async queue '" + debugId + "<W>' - running it on the main thread instead:");
@@ -212,9 +203,8 @@ public class AsyncQueue extends TimedQueue {
             // is answered yes and does so itself.
             ownerThread = null;
             workerDispatched = false;
-            // And one more drain with the marks down, which is the other half of the handover in runOnQueueThread. The two cover the two orders
-            // this can happen in: a task added before the marks came down is taken here, and one added after is run by the thread that added it,
-            // because by then isOnOwnerThread answers yes to whoever asks. Neither needs a lock on the queue's lifecycle to own the gap.
+            // The other half of the handover in runOnQueueThread: this drain takes anything added before the marks came down, and anything added
+            // after is run by the thread that added it. No lock on the queue lifecycle needed.
             runPendingTasks();
             if (!isStopped) {
                 try {

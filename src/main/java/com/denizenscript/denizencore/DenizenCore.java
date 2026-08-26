@@ -389,12 +389,9 @@ public class DenizenCore {
     private static final int SPINS_PER_YIELD = 64;
 
     /**
-     * Nanoseconds the main thread has spent in {@link #lingerForFollowUpRequests()} after its last answer, waiting for a follow-up that never
-     * came - ie what the window costs when it does not pay off. Written only by the main thread; volatile so a script can read it off-thread.
-     * <p>
-     * This is the honest price of {@link CoreConfiguration#mainThreadWaitLingerMicros}. It cannot be inferred from TPS: a few milliseconds a tick
-     * on a server with headroom shows up as nothing at all there, right up until the tick has no headroom left. Read it with
-     * <@link tag util.linger_stats>.
+     * Nanoseconds spent in {@link #lingerForFollowUpRequests()} after the last answer, waiting for a follow-up that never came - what
+     * {@link CoreConfiguration#mainThreadWaitLingerMicros} costs when it does not pay off. TPS cannot show this: a few ms a tick reads as nothing
+     * until the tick has no headroom left. Written only by the main thread, volatile so <@link tag util.linger_stats> can read it off-thread.
      */
     public static volatile long lingerIdleNanos = 0;
 
@@ -416,7 +413,7 @@ public class DenizenCore {
         long start = System.nanoTime();
         long hardEnd = start + LINGER_HARD_CAP_NANOS;
         long deadline = start + linger;
-        // The moment of the last thing worth waiting for. What comes after it, up to whichever exit is taken, is the part that bought nothing.
+        // What comes after the last answer, up to whichever exit is taken, is the part that bought nothing.
         long lastAnswer = start;
         lingerCount++;
         int spins = 0;
@@ -427,14 +424,13 @@ public class DenizenCore {
                 long after = System.nanoTime();
                 lastAnswer = after;
                 if (after >= hardEnd) {
-                    // Left on the cap immediately after answering, so nothing was spent waiting in vain.
-                    return;
+                    return; // Left on the cap right after answering, so nothing was spent in vain.
                 }
                 deadline = Math.min(after + linger, hardEnd);
                 spins = 0;
                 continue;
             }
-            // Reusing this reading rather than taking another: the deadline check needed it anyway, so measuring the tail costs nothing.
+            // The deadline check needed this reading anyway, so measuring the tail costs nothing.
             long now = System.nanoTime();
             if (now >= deadline) {
                 lingerIdleNanos += now - lastAnswer;

@@ -18,10 +18,9 @@ public class ReflectionHelper {
 
     public static boolean hasInitialized = false;
 
-    // Concurrent, not plain: these are reachable off the main thread. 'webget' is asyncSafe and runs its request on its own thread, and a
-    // 'method:patch' request goes through WebGetCommand.patchPatchMethodMethodsField, which reads a field and builds a final setter - both of
-    // which land here. That can run alongside a main thread reflection lookup (a reflected-object tag, property parsing, tag codegen on a script
-    // reload), and two threads writing a plain HashMap lose entries or corrupt it outright.
+    // Concurrent, not plain: these are reachable off the main thread. 'webget' is asyncSafe, and a 'method:patch' request goes through
+    // WebGetCommand.patchPatchMethodMethodsField, which reads a field and builds a final setter - both of which write these maps, possibly
+    // alongside a main thread lookup.
     private static final Map<Class<?>, FieldCache> cachedFields = new ConcurrentHashMap<>();
 
     private static final Map<Class<?>, Map<String, MethodHandle>> cachedFieldSetters = new ConcurrentHashMap<>();
@@ -79,8 +78,8 @@ public class ReflectionHelper {
         }
 
         public Field[] getAllFields() {
-            // Read once into a local and publish once at the end. Two threads may both build the array - harmless, it is the same content - but
-            // neither may hand out an array whose fields have not all had setAccessible called yet, which assigning first would allow.
+            // Built into a local and published at the end: two threads may both build it, harmlessly, but neither may hand out an array whose
+            // fields have not all had setAccessible called.
             Field[] fields = allFields;
             if (fields == null) {
                 fields = clazz.getDeclaredFields();
@@ -326,8 +325,8 @@ public class ReflectionHelper {
         if (result == null) {
             return null;
         }
-        // Straight back into the map fetched above rather than a second lookup: with two threads in here for the same field both build a valid
-        // handle and the later write wins, which is fine - a second get() on a map another thread could have replaced is not.
+        // Back into the map fetched above, not a second get() on one another thread could have replaced. Two threads here both build a valid
+        // handle and the later write wins, which is fine.
         map.put(field, result);
         return result;
     }

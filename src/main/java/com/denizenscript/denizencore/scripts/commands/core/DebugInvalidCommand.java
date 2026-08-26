@@ -59,9 +59,8 @@ public class DebugInvalidCommand extends AbstractCommand {
         AbstractCommand command = DenizenCore.commandRegistry.get(scriptEntry.internal.command);
         if (scriptEntry.internal.brokenArgs) {
             informBrokenArgs(command, scriptEntry);
-            // Both dead ends in here have to release the queue. A line written with '~' has already had the queue put on hold for it by
-            // ScriptEngine before this ran, and setFinished is the only thing that takes that hold off - so without this, '- ~define' with no
-            // arguments, or '- ~somethingmisspelled', stops its queue forever. It is a no-op on a line that was not waited on.
+            // Both dead ends here must release the queue: a '~' line was put on hold by ScriptEngine before this ran, and setFinished is the
+            // only thing that lifts it, so without this '- ~define' with no arguments stops its queue forever. A no-op on a line without '~'.
             scriptEntry.setFinished(true);
             return;
         }
