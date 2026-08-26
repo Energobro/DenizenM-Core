@@ -269,7 +269,9 @@ public class TagManager {
         TagBaseData baseHandler = event.alternateBase != null ? event.alternateBase : event.mainRef.tagBase;
         if (baseHandler != null && !DenizenCore.isMainThread() && requiresMainThread(baseHandler, event)) {
             // This tag reads live server state, so it can't be read from an async script's thread - let the main thread do it while we wait.
-            Debug.verboseLog("Tag '" + event.raw_tag + "' must be read on the main thread, handing it over from thread '" + Thread.currentThread().getName() + "'.");
+            if (CoreConfiguration.debugVerbose) {
+                Debug.verboseLog("Tag '" + event.raw_tag + "' must be read on the main thread, handing it over from thread '" + Thread.currentThread().getName() + "'.");
+            }
             long waitStart = System.nanoTime();
             try {
                 DenizenCore.runOnMainThreadAndWait(() -> fireEvent(event));

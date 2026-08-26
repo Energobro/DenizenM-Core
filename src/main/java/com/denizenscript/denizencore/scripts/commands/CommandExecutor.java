@@ -137,7 +137,9 @@ public class CommandExecutor {
                 return executeDeferred(scriptEntry);
             }
             // This command can't safely run off-thread, so the async queue waits while the main thread runs it.
-            Debug.verboseLog("Command '" + command.getName() + "' isn't async-safe, handing it to the main thread from thread '" + Thread.currentThread().getName() + "'.");
+            if (CoreConfiguration.debugVerbose) {
+                Debug.verboseLog("Command '" + command.getName() + "' isn't async-safe, handing it to the main thread from thread '" + Thread.currentThread().getName() + "'.");
+            }
             boolean[] result = new boolean[1];
             long waitStart = System.nanoTime();
             try {
@@ -207,7 +209,9 @@ public class CommandExecutor {
             setCurrentQueue(null);
             Debug.setCurrentContext(lastContext);
         }
-        Debug.verboseLog("Command '" + command.getName() + "' handed to the main thread without waiting, from thread '" + Thread.currentThread().getName() + "'.");
+        if (CoreConfiguration.debugVerbose) {
+            Debug.verboseLog("Command '" + command.getName() + "' handed to the main thread without waiting, from thread '" + Thread.currentThread().getName() + "'.");
+        }
         DenizenCore.runOnMainThread(() -> {
             TagContext priorContext = Debug.getCurrentContext();
             try {

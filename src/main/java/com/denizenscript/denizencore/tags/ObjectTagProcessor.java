@@ -190,7 +190,9 @@ public class ObjectTagProcessor<T extends ObjectTag> {
         if ((mainThreadOnly || mainThreadOnlyTags != null) && !DenizenCore.isMainThread() && requiresMainThread(nextComponent.key)) {
             // This object reads live server state, so an async script can't read it directly.
             // The whole remaining tag runs on the main thread in one hand-off - the recursive call below sees the main thread and proceeds normally.
-            Debug.verboseLog("Tag '" + nextComponent.key + "' on a main-thread-only object, handing it over from thread '" + Thread.currentThread().getName() + "'.");
+            if (CoreConfiguration.debugVerbose) {
+                Debug.verboseLog("Tag '" + nextComponent.key + "' on a main-thread-only object, handing it over from thread '" + Thread.currentThread().getName() + "'.");
+            }
             ObjectTag[] result = new ObjectTag[1];
             long waitStart = System.nanoTime();
             try {
