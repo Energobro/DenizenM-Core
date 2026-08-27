@@ -734,6 +734,20 @@ public class ListTag implements List<String>, ObjectTag {
         return integerIndex - 1;
     }
 
+    static BigDecimal dotProductOf(ListTag first, ListTag second, Attribute attribute) {
+        int size = Math.min(first.size(), second.size());
+        BigDecimal result = BigDecimal.ZERO;
+        for (int i = 0; i < size; i++) {
+            String left = first.get(i), right = second.get(i);
+            if (!ArgumentHelper.matchesDouble(left) || !ArgumentHelper.matchesDouble(right)) {
+                attribute.echoError("Element '" + left + "' or '" + right + "' is not a valid decimal number!");
+                return null;
+            }
+            result = result.add(new ElementTag(left).asBigDecimal().multiply(new ElementTag(right).asBigDecimal()));
+        }
+        return result;
+    }
+
     public static void register() {
 
         // <--[tag]
@@ -1816,6 +1830,120 @@ public class ListTag implements List<String>, ObjectTag {
             catch (Throwable e) {
                 return new ElementTag(sum.doubleValue() / object.size());
             }
+        });
+
+        // <--[tag]
+        // @attribute <ListTag.dot_product[<list>]>
+        // @returns ElementTag(Decimal)
+        // @description
+        // Returns the dot product of this list and the input list, that is, the sum of each pair of values multiplied together.
+        // If the lists are of different sizes, the smaller size is used.
+        // All values used from both lists must be numbers.
+        // @Example
+        // # Narrates "32"
+        // - narrate <list[1|2|3].dot_product[4|5|6]>
+        // -->
+        tagProcessor.registerStaticTag(ElementTag.class, ListTag.class, "dot_product", (attribute, object, second) -> {
+            BigDecimal result = dotProductOf(object, second, attribute);
+            return result == null ? null : new ElementTag(result);
+        });
+
+        // <--[tag]
+        // @attribute <ListTag.matrix_mul[<list>]>
+        // @returns ListTag
+        // @description
+        // Returns the product of this list, read as a matrix of rows, and the input list, read as a vector.
+        // That is, each row is dot-multiplied with the input list, giving one value per row.
+        // If a row and the input list are of different sizes, the smaller size is used.
+        // Entries of this list that aren't themselves lists are ignored.
+        // All values used must be numbers.
+        // @Example
+        // # Narrates a list of "17" and "41"
+        // - narrate <list[<list[1|2|3]>|<list[4|5|6]>].matrix_mul[2|3|3]>
+        // -->
+        tagProcessor.registerStaticTag(ListTag.class, ListTag.class, "matrix_mul", (attribute, object, vector) -> {
+            ListTag result = new ListTag(object.size());
+            for (ObjectTag row : object.objectForms) {
+                if (!row.shouldBeType(ListTag.class)) {
+                    continue;
+                }
+                BigDecimal value = dotProductOf(ListTag.getListFor(row, attribute.context), vector, attribute);
+                if (value == null) {
+                    return null;
+                }
+                result.addObject(new ElementTag(value));
+            }
+            return result;
+        });
+
+        // <--[tag]
+        // @attribute <ListTag.activation[(<type>)]>
+        // @returns ListTag
+        // @description
+        // Returns a copy of the list with an activation function applied to it.
+        // Optionally specify which function to use, from "relu", "sigmoid", "tanh", or "softmax". Defaults to "relu".
+        // "softmax" is applied across the list as a whole, the others are applied to each value on its own.
+        // All values in the list must be numbers.
+        // @Example
+        // # Narrates a list of "0", "0", and "1.5"
+        // - narrate <list[-2|0|1.5].activation>
+        // @Example
+        // # Narrates a list of "0.25", "0.25", "0.25", and "0.25"
+        // - narrate <list[1|1|1|1].activation[softmax]>
+        // -->
+        tagProcessor.registerStaticTag(ListTag.class, "activation", (attribute, object) -> {
+            String type = attribute.hasParam() ? CoreUtilities.toLowerCase(attribute.getParam()) : "relu";
+            double[] values = new double[object.size()];
+            for (int i = 0; i < values.length; i++) {
+                String entry = object.get(i);
+                if (!ArgumentHelper.matchesDouble(entry)) {
+                    attribute.echoError("Element '" + entry + "' is not a valid decimal number!");
+                    return null;
+                }
+                values[i] = new ElementTag(entry).asDouble();
+            }
+            switch (type) {
+                case "relu" -> {
+                    for (int i = 0; i < values.length; i++) {
+                        values[i] = Math.max(0, values[i]);
+                    }
+                }
+                case "sigmoid" -> {
+                    for (int i = 0; i < values.length; i++) {
+                        values[i] = 1 / (1 + Math.exp(-values[i]));
+                    }
+                }
+                case "tanh" -> {
+                    for (int i = 0; i < values.length; i++) {
+                        values[i] = Math.tanh(values[i]);
+                    }
+                }
+                case "softmax" -> {
+                    double max = Double.NEGATIVE_INFINITY;
+                    for (double value : values) {
+                        max = Math.max(max, value);
+                    }
+                    double total = 0;
+                    for (int i = 0; i < values.length; i++) {
+                        values[i] = Math.exp(values[i] - max);
+                        total += values[i];
+                    }
+                    if (total != 0) {
+                        for (int i = 0; i < values.length; i++) {
+                            values[i] /= total;
+                        }
+                    }
+                }
+                default -> {
+                    attribute.echoError("Invalid activation type '" + type + "', must be 'relu', 'sigmoid', 'tanh', or 'softmax'.");
+                    return null;
+                }
+            }
+            ListTag result = new ListTag(values.length);
+            for (double value : values) {
+                result.addObject(new ElementTag(value));
+            }
+            return result;
         });
 
         // <--[tag]
