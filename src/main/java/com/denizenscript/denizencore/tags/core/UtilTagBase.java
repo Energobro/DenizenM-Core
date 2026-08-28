@@ -882,12 +882,15 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
         // @attribute <util.linger_stats>
         // @returns MapTag
         // @description
-        // Returns a map of what the main thread's wait window has cost, with keys 'idle_time' (a DurationTag) and 'count'.
+        // Returns a map of what the main thread's wait window has cost, with keys 'idle_time' (a DurationTag), 'count', and 'window' (a DurationTag).
         // <@link language Async Queues> explains the window itself: after answering an async script's request, the main thread waits a moment
         // for the next one, because requests arrive back to back and the next is usually microseconds behind.
         // 'idle_time' is the total time spent waiting after the last answer for a follow-up that never came - the part of the window that bought
         // nothing. 'count' is how many times the window has been entered since the server started, so the two divide into a cost per entry.
         // Sample both across a stretch of time and subtract, rather than reading the totals: they only ever grow.
+        // 'window' is the length the next window will use, which is not a total and is read as-is. It doubles after a window that caught a
+        // follow-up and halves after one that did not, between 'Main thread wait linger us' and four times it, so a script working through a
+        // chain earns a longer window than a script that asks once.
         // This cannot be seen in TPS. A few milliseconds a tick on a server with headroom costs exactly nothing measurable there, until the day
         // the tick has no headroom left, so tune 'Main thread wait linger us' against this rather than against TPS.
         // -->
@@ -895,6 +898,7 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
             MapTag result = new MapTag();
             result.putObject("idle_time", new DurationTag(DenizenCore.lingerIdleNanos / 1000000000.0));
             result.putObject("count", new ElementTag(DenizenCore.lingerCount));
+            result.putObject("window", new DurationTag(DenizenCore.nextLingerNanos() / 1000000000.0));
             return result;
         });
 

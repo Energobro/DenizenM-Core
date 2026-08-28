@@ -388,6 +388,10 @@ public class DenizenCore {
     /** How many empty polls to spin through before yielding once, so that on a box with few cores the thread being waited for can actually run. */
     private static final int SPINS_PER_YIELD = 64;
 
+    private static final int LINGER_ADAPTIVE_MAX_MULTIPLIER = 4;
+
+    public static volatile long lingerAdaptiveNanos = 0;
+
     /**
      * Nanoseconds spent in {@link #lingerForFollowUpRequests()} after the last answer, waiting for a follow-up that never came - what
      * {@link CoreConfiguration#mainThreadWaitLingerMicros} costs when it does not pay off. TPS cannot show this: a few ms a tick reads as nothing
@@ -398,6 +402,11 @@ public class DenizenCore {
     /** How many times the window has been entered, so the idle total above can be read as an average per entry. */
     public static volatile long lingerCount = 0;
 
+    public static long nextLingerNanos() {
+        long base = CoreConfiguration.mainThreadWaitLingerMicros * 1000L;
+        return Math.max(base, Math.min(lingerAdaptiveNanos, base * LINGER_ADAPTIVE_MAX_MULTIPLIER));
+    }
+
     /**
      * Waits a moment for an async script's next request, answers it, and keeps going until nothing more arrives in time.
      * <p>
@@ -406,13 +415,14 @@ public class DenizenCore {
      * Each answer restarts the window, so a script working through a chain keeps its turn, but never past the hard cap above.
      */
     private static void lingerForFollowUpRequests() {
-        long linger = CoreConfiguration.mainThreadWaitLingerMicros * 1000L;
-        if (linger <= 0) {
+        long base = CoreConfiguration.mainThreadWaitLingerMicros * 1000L;
+        if (base <= 0) {
             return;
         }
+        long linger = nextLingerNanos();
         long start = System.nanoTime();
         long hardEnd = start + LINGER_HARD_CAP_NANOS;
-        long deadline = start + linger;
+        long deadline = Math.min(start + linger, hardEnd);
         // What comes after the last answer, up to whichever exit is taken, is the part that bought nothing.
         long lastAnswer = start;
         lingerCount++;
@@ -424,6 +434,7 @@ public class DenizenCore {
                 long after = System.nanoTime();
                 lastAnswer = after;
                 if (after >= hardEnd) {
+                    adaptLingerWindow(linger, base, true);
                     return; // Left on the cap right after answering, so nothing was spent in vain.
                 }
                 deadline = Math.min(after + linger, hardEnd);
@@ -434,6 +445,7 @@ public class DenizenCore {
             long now = System.nanoTime();
             if (now >= deadline) {
                 lingerIdleNanos += now - lastAnswer;
+                adaptLingerWindow(linger, base, lastAnswer != start);
                 return;
             }
             if (++spins >= SPINS_PER_YIELD) {
@@ -444,6 +456,11 @@ public class DenizenCore {
                 Thread.onSpinWait();
             }
         }
+    }
+
+    private static void adaptLingerWindow(long linger, long base, boolean productive) {
+        long next = productive ? linger * 2 : linger / 2;
+        lingerAdaptiveNanos = Math.max(base, Math.min(next, base * LINGER_ADAPTIVE_MAX_MULTIPLIER));
     }
 
     /**
