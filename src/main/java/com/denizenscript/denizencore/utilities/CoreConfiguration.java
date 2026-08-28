@@ -87,7 +87,7 @@ public class CoreConfiguration {
      * Each async queue owns a thread for its whole life, including while it sits in a 'wait', so a script that starts them in bulk
      * quietly turns into that many threads. This is the early word about it; {@link #asyncQueueCountLimit} is the backstop.
      */
-    public static int asyncQueueCountWarning = 50;
+    public static int asyncQueueCountWarning = 128;
 
     /**
      * Never run more than this many async queues at once. Set to 0 for no limit.
