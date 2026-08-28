@@ -109,7 +109,7 @@ A line is **not** handed over this way if the script is waiting for it anyway (`
 
 `<util.is_main_thread>` tells you where a tag is actually being read.
 
-`<util.linger_stats>` reports what the main thread's wait window costs when it does not pay off - `idle_time` is time spent waiting for a follow-up request that never came, `count` is how many times the window was entered. Both only grow, so sample and subtract. Tune `Main thread wait linger us` against this rather than against TPS, which cannot see a few milliseconds a tick until the day there is no headroom left.
+`<util.linger_stats>` reports what the main thread's wait window costs when it does not pay off - `idle_time` is time spent waiting for a follow-up request that never came, `count` is how many times the window was entered. Both only grow, so sample and subtract. `window` is the third key and the odd one out: it is the length the next window will use, read as-is rather than divided by anything, and it is the only way to watch the window adapt. Tune `Main thread wait linger us` against all three rather than against TPS, which cannot see a few milliseconds a tick until the day there is no headroom left.
 
 ### Small examples
 
@@ -186,8 +186,8 @@ Scripts:
         Main thread wait timeout: 15s  # how long an async script waits for the main thread before erroring
         Shutdown timeout: 3s           # how long shutdown waits for async queues to finish
         Main thread task budget ms: 5  # per tick, for work handed over without waiting; 0 for no budget
-        Main thread wait linger us: 500 # how long the main thread keeps watching for the next request after answering one; 0 to answer once per tick
-        Warn at queue count: 50        # warn once when this many async queues are live; 0 to never warn
+        Main thread wait linger us: 500 # the floor of the window the main thread keeps watching for the next request; 0 to answer once per tick
+        Warn at queue count: 128       # warn once when this many async queues are live; 0 to never warn
         Max queue count: 256           # past this, a new async queue runs on the main thread instead; 0 for no limit
 ```
 
@@ -195,7 +195,9 @@ Each async queue owns a thread for its whole life, including while it sits in a 
 
 Work handed over *without* waiting - deferred commands, debug output - is budgeted per tick, because a script can produce it faster than the main thread can run it. The script never waits on any of it, so the budget costs it nothing; it only spreads the delivery.
 
-Requests a script *is* waiting on are never budgeted, always served first, and the main thread does not leave the instant it has answered them. It keeps watching for `Main thread wait linger us`, because the next request is usually microseconds behind the last. Every answer restarts the window, and a hard limit of 5ms per pass stops a script asking in a tight loop from holding the tick open.
+Requests a script *is* waiting on are never budgeted, always served first, and the main thread does not leave the instant it has answered them. It keeps watching for a moment, because the next request is usually microseconds behind the last. Every answer restarts the window, and a hard limit of 5ms per pass stops a script asking in a tight loop from holding the tick open.
+
+`Main thread wait linger us` is the floor of that window, not its length. A window that catches a follow-up doubles the next one; one that waits in vain halves it back, between the setting and four times it. So a script working through a chain earns the long window - where it is nearly free, because each answer ends it early - while a script that asks once settles back at the floor. The floor is what stops a workload pinning itself short forever: a window that never catches anything can never grow.
 
 That default was measured in both directions. Dropping it to 100us cost 23x the waiting for the same work; raising it to 2000us saved about a third of what remained, but quadrupled what the window costs the main thread when nothing follows - 2ms per drain instead of 0.5ms, up to twice a tick. Raise it only if your server has headroom to spare and its scripts read live values often, and check what it actually costs you with `<util.linger_stats>`.
 
