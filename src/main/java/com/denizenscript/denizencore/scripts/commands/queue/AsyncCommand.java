@@ -27,6 +27,7 @@ public class AsyncCommand extends BracedCommand {
         // Only the marker is registered by hand - 'detached' is registered by autoCompile, from the autoExecute signature.
         // Registering it in both places would hand out two indices for one name and overrun the entry's boolean array.
         setBooleansHandled("\0callback");
+        generateDebug = false; // The generated report would print for the marker entry too - see the callback branch in autoExecute.
         autoCompile();
         asyncSafe = true; // Only touches its own queue and thread-safe data.
         forceHold = true; // A block command has nowhere to write a '~', so it holds its queue by default instead.
@@ -34,9 +35,9 @@ public class AsyncCommand extends BracedCommand {
 
     // <--[command]
     // @Name Async
-    // @Syntax async (detached) [<commands>]
+    // @Syntax async (detached) (copy_defs:<name>|...) [<commands>]
     // @Required 0
-    // @Maximum 1
+    // @Maximum 2
     // @Short Runs a block of commands on a separate thread.
     // @Group queue
     //
@@ -157,8 +158,9 @@ public class AsyncCommand extends BracedCommand {
             scriptEntry.setFinished(true);
             return;
         }
-        // Note: no debug report here - the generated executor already prints this command's name and arguments,
-        // and the queue is on the line above it. Reporting again just doubled the output.
+        if (scriptEntry.dbCallShouldDebug()) {
+            Debug.report(scriptEntry, "async", db("detached", detached), db("copy_defs", copyDefs));
+        }
         ScriptQueue queue = scriptEntry.getResidingQueue();
         List<ScriptEntry> entries = getBracedCommandsDirect(scriptEntry, scriptEntry);
         if (entries == null || entries.isEmpty()) {
