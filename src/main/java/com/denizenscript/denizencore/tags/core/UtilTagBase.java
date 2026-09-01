@@ -878,6 +878,26 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
             return new ElementTag(System.nanoTime());
         });
 
+        // TEMPORARY tag-shape measurement, remove together with TagManager.TAG_SHAPE_COUNTS.
+        // <util.tag_shapes> reads the counts, <util.tag_shapes[reset]> zeroes them first.
+        tagProcessor.registerTag(MapTag.class, "tag_shapes", (attribute, object) -> {
+            boolean reset = attribute.hasParam() && CoreUtilities.equalsIgnoreCase(attribute.getParam(), "reset");
+            MapTag result = new MapTag();
+            long total = 0;
+            for (int i = 0; i < TagManager.TAG_SHAPE_COUNTS.length; i++) {
+                long value = TagManager.TAG_SHAPE_COUNTS[i].sum();
+                total += value;
+                result.putObject(TagManager.TAG_SHAPE_NAMES[i], new ElementTag(value));
+            }
+            result.putObject("total", new ElementTag(total));
+            if (reset) {
+                for (java.util.concurrent.atomic.LongAdder counter : TagManager.TAG_SHAPE_COUNTS) {
+                    counter.reset();
+                }
+            }
+            return result;
+        });
+
         // <--[tag]
         // @attribute <util.linger_stats>
         // @returns MapTag

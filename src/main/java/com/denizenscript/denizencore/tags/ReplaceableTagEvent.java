@@ -45,6 +45,9 @@ public class ReplaceableTagEvent {
 
         public int skippable = 0;
 
+        /** TEMPORARY tag-shape measurement, remove with the counters in TagManager. Classified once per distinct tag, -1 until then. */
+        public byte shapeKind = -1;
+
         public ObjectTag rawObject = null;
     }
 

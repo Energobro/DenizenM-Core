@@ -369,7 +369,43 @@ public class TagManager {
         executor.shutdownNow();
     }
 
+    /** TEMPORARY tag-shape measurement. Remove this block, ReferenceData.shapeKind, and the util.tag_shapes tag together. */
+    public static final java.util.concurrent.atomic.LongAdder[] TAG_SHAPE_COUNTS = new java.util.concurrent.atomic.LongAdder[5];
+
+    public static final String[] TAG_SHAPE_NAMES = new String[] {"pure_definition", "definition_with_fallback_or_dynamic", "definition_with_subtags", "other_compiled", "other_generic"};
+
+    static {
+        for (int i = 0; i < TAG_SHAPE_COUNTS.length; i++) {
+            TAG_SHAPE_COUNTS[i] = new java.util.concurrent.atomic.LongAdder();
+        }
+    }
+
+    /** TEMPORARY. Runs once per distinct tag, since ReferenceData is cached per tag text - the per-evaluation cost is one array read. */
+    public static byte classifyTagShape(ReplaceableTagEvent.ReferenceData data) {
+        if (data == null || data.attribs == null || data.attribs.attributes.length < 1) {
+            return 4;
+        }
+        Attribute.AttributeComponent[] parts = data.attribs.attributes;
+        String base = parts[0].key;
+        boolean isDefinition = base.equals("definition") || base.equals("def") || base.isEmpty();
+        if (!isDefinition) {
+            return data.compiledStart != null ? (byte) 3 : (byte) 4;
+        }
+        if (parts.length > 1) {
+            return 2;
+        }
+        boolean plainName = data.alternative == null && parts[0].rawParam != null
+                && (parts[0].paramParsed == null || !parts[0].paramParsed.hasTag);
+        return plainName ? (byte) 0 : (byte) 1;
+    }
+
     public static ObjectTag readSingleTagObject(ParseableTagPiece tag, TagContext context) {
+        byte shape = tag.tagData == null ? 4 : tag.tagData.shapeKind;
+        if (shape < 0) {
+            shape = classifyTagShape(tag.tagData);
+            tag.tagData.shapeKind = shape;
+        }
+        TAG_SHAPE_COUNTS[shape].increment();
         ReplaceableTagEvent event = new ReplaceableTagEvent(tag.tagData, tag.content, context);
         return readSingleTagObject(context, event);
     }
