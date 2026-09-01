@@ -12,6 +12,9 @@ public class ElseCommand extends AbstractCommand {
         setSyntax("else (if <comparison logic>)");
         setRequiredArguments(0, -1);
         isProcedural = true;
+        generateDebug = false;
+        autoCompile();
+        generatorInfiniteArgs = true;
         asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
@@ -35,12 +38,7 @@ public class ElseCommand extends AbstractCommand {
     // See IF command documentation.
     // -->
 
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-    }
-
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
+    public static void autoExecute(ScriptEntry scriptEntry) {
 
         // If this command executes normally, it's misplaced. It should always be skipped past under normal execution.
         Debug.echoError(scriptEntry, "Misplaced ELSE command.");

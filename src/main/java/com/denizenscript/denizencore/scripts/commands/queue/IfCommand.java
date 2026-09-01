@@ -24,6 +24,9 @@ public class IfCommand extends BracedCommand {
         setRequiredArguments(1, -1);
         setParseArgs(false);
         isProcedural = true;
+        generateDebug = false;
+        autoCompile();
+        generatorInfiniteArgs = true;
         asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
@@ -173,10 +176,10 @@ public class IfCommand extends BracedCommand {
         return parsed;
     }
 
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
+    public static void autoExecute(ScriptEntry scriptEntry) {
         ParsedIf parsed = parsedFor(scriptEntry, "if");
         boolean has_brace = parsed.hasBrace;
+        List<BracedData> braces = null;
         if (scriptEntry.getInsideList() != null) {
             // 'false' - the body is NOT cloned here. parseArgs runs on every execution, and cloning every line of every branch before the
             // condition has even been read costs a ScriptEntry clone per line whether that branch runs or not. execute clones the one branch
@@ -209,28 +212,16 @@ public class IfCommand extends BracedCommand {
                 elseRef.args = elseParsed.bracedArgs;
                 allData.add(elseRef);
             }
-            scriptEntry.addObject("braces", allData);
+            braces = allData;
         }
         else if (has_brace) {
-            scriptEntry.addObject("braces", getBracedCommands(scriptEntry, false));
+            braces = getBracedCommands(scriptEntry, false);
         }
-        if (!has_brace && parsed.hasElsecommand) {
-            scriptEntry.addObject("elsecommand", parsed.elsecommand);
-        }
-        if (!has_brace && (parsed.hasSubcommand || parsed.hasElsecommand)) {
-            scriptEntry.addObject("subcommand", parsed.subcommand);
-        }
-        scriptEntry.addObject("comparisons", parsed.comparisons);
-    }
-
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
-        List<String> subcommand = (List<String>) scriptEntry.getObject("subcommand");
-        List<String> elsecommand = (List<String>) scriptEntry.getObject("elsecommand");
-        List<String> comparisons = (List<String>) scriptEntry.getObject("comparisons");
-        List<BracedData> braces = (List<BracedData>) scriptEntry.getObject("braces");
+        List<String> elsecommand = !has_brace && parsed.hasElsecommand ? parsed.elsecommand : null;
+        List<String> subcommand = !has_brace && (parsed.hasSubcommand || parsed.hasElsecommand) ? parsed.subcommand : null;
+        List<String> comparisons = parsed.comparisons;
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, getName(), db("use_braces", braces != null));
+            Debug.report(scriptEntry, "IF", db("use_braces", braces != null));
         }
         if (CoreConfiguration.debugVerbose) {
             Debug.log("comparisons=" + comparisons + ", sc:" + subcommand + ", ec:" + elsecommand);
@@ -319,7 +310,7 @@ public class IfCommand extends BracedCommand {
         Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
     }
 
-    public void executeCommandList(List<String> subcommand, ScriptEntry scriptEntry) {
+    public static void executeCommandList(List<String> subcommand, ScriptEntry scriptEntry) {
         try {
             scriptEntry.setInstant(true);
             String cmd = subcommand.get(0);
