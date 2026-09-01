@@ -63,6 +63,13 @@ public class ReplaceableTagEvent {
     /** Cache of pre-parsed tag reference data. Concurrent, as tags can be parsed from async queues. */
     public static Map<String, ReferenceData> refs = new ConcurrentHashMap<>();
 
+    public ReplaceableTagEvent(ReferenceData ref, String tag, Attribute prepared) {
+        this.unreplacedText = tag;
+        mainRef = ref;
+        core_attributes = prepared;
+        raw_tag = ref.rawTag;
+    }
+
     public ReplaceableTagEvent(ReferenceData ref, String tag, TagContext context) {
         // If tag is not replaced, return the tag
         // TODO: Possibly make this return "null" ... might break some

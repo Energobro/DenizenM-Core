@@ -408,9 +408,6 @@ public class TagManager {
             return;
         }
         Attribute.AttributeComponent[] parts = data.attribs.attributes;
-        if (parts.length != 1) {
-            return;
-        }
         String key = parts[0].key;
         if (!key.isEmpty() && !key.equals("definition") && !key.equals("def")) {
             return;
@@ -436,7 +433,23 @@ public class TagManager {
                 ObjectTag definition = provider.getDefinitionObject(data.plainDefinitionKey);
                 if (definition != null) {
                     TAG_SHAPE_COUNTS[5].increment();
-                    return definition.refreshState();
+                    if (data.attribs.attributes.length == 1) {
+                        return definition.refreshState();
+                    }
+                    Attribute attribute = new Attribute(data.attribs, context.entry, context, data.skippable);
+                    TagContext lastContext = Debug.getCurrentContext();
+                    Debug.setCurrentContext(context);
+                    ObjectTag result;
+                    try {
+                        result = CoreUtilities.fixType(definition, attribute.context).getObjectAttribute(attribute.fulfill(1));
+                    }
+                    finally {
+                        Debug.setCurrentContext(lastContext);
+                    }
+                    if (result != null) {
+                        return result;
+                    }
+                    return finishFailedTag(context, new ReplaceableTagEvent(data, tag.content, attribute));
                 }
             }
         }
@@ -472,38 +485,52 @@ public class TagManager {
         }
     }
 
+    public static ObjectTag finishFailedTag(TagContext context, ReplaceableTagEvent event) {
+        if (event.hasAlternative()) {
+            event.setReplacedObject(event.getAlternative());
+        }
+        if (!event.replaced()) {
+            return reportTagFailure(context, event);
+        }
+        return event.getReplacedObj();
+    }
+
+    public static ObjectTag reportTagFailure(TagContext context, ReplaceableTagEvent event) {
+        String tagStr = "<LG><" + event + "<LG>><W>";
+        Debug.echoError(context, "Tag " + tagStr + " is invalid!");
+        recentTagError = true;
+        if (OBJECTTAG_CONFUSION_PATTERN.matcher(tagStr).matches()) {
+            Debug.echoError(context, "'ObjectTag' notation is for documentation purposes, and not to be used literally."
+                + " An actual object must be inserted instead. If confused, join our Discord at https://discord.gg/Q6pZGSR to ask for help!");
+        }
+        if (!event.hasAlternative()) {
+            Attribute attribute = event.getAttributes();
+            if (attribute.fulfilled < attribute.attributes.length) {
+                Debug.echoError(context, "Unfilled or unrecognized sub-tag(s) '<LR>" + attribute.unfilledString() + "<W>' for tag <LG><" + attribute.origin + "<LG>><W>!");
+                if (attribute.lastValid != null) {
+                    Debug.echoError(context, "The returned value from initial tag fragment '<LG>" + attribute.filledString() + "<W>' was: '<LG>" + attribute.lastValid.debuggable() + "<W>'.");
+                }
+                if (attribute.seemingSuccesses.size() > 0) {
+                    String almost = attribute.seemingSuccesses.get(attribute.seemingSuccesses.size() - 1);
+                    if (attribute.hasContextFailed) {
+                        Debug.echoError(context, "Almost matched but failed (missing [context] parameter?): " + almost);
+                    }
+                    else {
+                        Debug.echoError(context, "Almost matched but failed (possibly bad input?): " + almost);
+                    }
+                }
+            }
+        }
+    return new ElementTag(event.raw_tag);
+    }
+
     public static ObjectTag readSingleTagObject(TagContext context, ReplaceableTagEvent event) {
         readSingleTagObjectNoDebug(context, event);
         if ((context.debug || CoreConfiguration.debugOverride) && event.replaced()) {
             Debug.echoDebug(context, "<G>Filled tag <<W>" + event + "<G>> with '<W>" + event.getReplacedObj().debuggable() + "<G>'.");
         }
         if (!event.replaced()) {
-            String tagStr = "<LG><" + event + "<LG>><W>";
-            Debug.echoError(context, "Tag " + tagStr + " is invalid!");
-            recentTagError = true;
-            if (OBJECTTAG_CONFUSION_PATTERN.matcher(tagStr).matches()) {
-                Debug.echoError(context, "'ObjectTag' notation is for documentation purposes, and not to be used literally."
-                    + " An actual object must be inserted instead. If confused, join our Discord at https://discord.gg/Q6pZGSR to ask for help!");
-            }
-            if (!event.hasAlternative()) {
-                Attribute attribute = event.getAttributes();
-                if (attribute.fulfilled < attribute.attributes.length) {
-                    Debug.echoError(context, "Unfilled or unrecognized sub-tag(s) '<LR>" + attribute.unfilledString() + "<W>' for tag <LG><" + attribute.origin + "<LG>><W>!");
-                    if (attribute.lastValid != null) {
-                        Debug.echoError(context, "The returned value from initial tag fragment '<LG>" + attribute.filledString() + "<W>' was: '<LG>" + attribute.lastValid.debuggable() + "<W>'.");
-                    }
-                    if (attribute.seemingSuccesses.size() > 0) {
-                        String almost = attribute.seemingSuccesses.get(attribute.seemingSuccesses.size() - 1);
-                        if (attribute.hasContextFailed) {
-                            Debug.echoError(context, "Almost matched but failed (missing [context] parameter?): " + almost);
-                        }
-                        else {
-                            Debug.echoError(context, "Almost matched but failed (possibly bad input?): " + almost);
-                        }
-                    }
-                }
-            }
-            return new ElementTag(event.raw_tag);
+            return reportTagFailure(context, event);
         }
         return event.getReplacedObj();
     }
