@@ -211,7 +211,16 @@ public class ObjectTagProcessor<T extends ObjectTag> {
         ObjectTag returned;
         TagData data = nextComponent.data;
         if (data == null) {
-            data = registeredObjectTags.get(nextComponent.key);
+            Attribute.ResolvedSubTag resolved = nextComponent.resolvedSubTag;
+            if (resolved != null && resolved.processor == this) {
+                data = resolved.data;
+            }
+            else {
+                data = registeredObjectTags.get(nextComponent.key);
+                if (data != null) {
+                    nextComponent.resolvedSubTag = new Attribute.ResolvedSubTag(this, data);
+                }
+            }
         }
         if (data != null) {
             if (CoreConfiguration.debugVerbose) {

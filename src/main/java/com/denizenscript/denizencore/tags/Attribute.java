@@ -15,6 +15,18 @@ import java.util.concurrent.ConcurrentHashMap;
 
 public class Attribute implements TagContext.ShowErrorsMethod {
 
+    public static final class ResolvedSubTag {
+
+        public final ObjectTagProcessor<?> processor;
+
+        public final ObjectTagProcessor.TagData<? extends ObjectTag, ? extends ObjectTag> data;
+
+        public ResolvedSubTag(ObjectTagProcessor<?> processor, ObjectTagProcessor.TagData<? extends ObjectTag, ? extends ObjectTag> data) {
+            this.processor = processor;
+            this.data = data;
+        }
+    }
+
     public static class AttributeComponent {
 
         public final String rawKey;
@@ -26,6 +38,8 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         public ParseableTag paramParsed;
 
         public ObjectTagProcessor.TagData<? extends ObjectTag, ? extends ObjectTag> data;
+
+        public ResolvedSubTag resolvedSubTag;
 
         public AttributeComponent(String inp) {
             if (inp.endsWith("]") && CoreUtilities.contains(inp, '[')) {
