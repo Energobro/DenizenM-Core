@@ -173,8 +173,16 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         if (context == null) {
             context = CoreUtilities.basicContext;
         }
+        if (!hadAlternative && context.showErrors == TagContext.DEFAULT_SHOW_ERRORS
+                && context != CoreUtilities.basicContext && context != CoreUtilities.noDebugContext && context != CoreUtilities.errorButNoDebugContext) {
+            this.context = context;
+            return;
+        }
         this.context = context.clone();
         this.context.showErrors = this;
+        if (hadAlternative) {
+            this.context.debug = false;
+        }
     }
 
     @Override
@@ -185,9 +193,9 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     public Attribute(Attribute ref, ScriptEntry scriptEntry, TagContext context, int skippable) {
         origin = ref.origin;
         this.scriptEntry = scriptEntry;
-        setContext(context);
         attributes = ref.attributes;
-        setHadAlternative(ref.hadAlternative);
+        hadAlternative = ref.hadAlternative;
+        setContext(context);
         if (this.context.debug) {
             filled = new int[attributes.length];
             for (int i = 0; i < skippable; i++) {
@@ -382,14 +390,9 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         if (inp == null) {
             return null;
         }
-        DefinitionProvider originalProvider = context.definitionProvider;
-        context.definitionProvider = customProvider;
-        try {
-            return TagManager.tagObject(inp, context);
-        }
-        finally {
-            context.definitionProvider = originalProvider;
-        }
+        TagContext subContext = context.clone();
+        subContext.definitionProvider = customProvider;
+        return TagManager.tagObject(inp, subContext);
     }
 
     public final MapTag inputParameterMap() {
@@ -568,10 +571,14 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     public void setHadAlternative(boolean hadAlternative) {
         this.hadAlternative = hadAlternative;
-        if (context != null && context.debug && hadAlternative) {
-            context = context.clone();
-            context.debug = false;
+        if (!hadAlternative || context == null) {
+            return;
         }
+        if (context.showErrors != this) {
+            context = context.clone();
+            context.showErrors = this;
+        }
+        context.debug = false;
     }
 
     public final long getLongParam() {

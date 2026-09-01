@@ -2569,9 +2569,8 @@ public class ListTag implements List<String>, ObjectTag {
                 return null;
             }
             ListTag newlist = new ListTag();
-            TagContext context = attribute.context;
+            TagContext context = attribute.context.clone();
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(context.definitionProvider);
-            DefinitionProvider originalProvider = context.definitionProvider;
             context.definitionProvider = provider;
             try {
                 String raw = attribute.getRawParam();
@@ -2587,9 +2586,7 @@ public class ListTag implements List<String>, ObjectTag {
             catch (Exception ex) {
                 Debug.echoError(ex);
             }
-            finally {
-                context.definitionProvider = originalProvider;
-            }
+
             return newlist;
         });
 
@@ -2611,9 +2608,8 @@ public class ListTag implements List<String>, ObjectTag {
                 return null;
             }
             ListTag newlist = new ListTag(object.size());
-            TagContext context = attribute.context;
+            TagContext context = attribute.context.clone();
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(context.definitionProvider);
-            DefinitionProvider originalProvider = context.definitionProvider;
             context.definitionProvider = provider;
             try {
                 String raw = attribute.getRawParam();
@@ -2627,9 +2623,7 @@ public class ListTag implements List<String>, ObjectTag {
             catch (Exception ex) {
                 Debug.echoError(ex);
             }
-            finally {
-                context.definitionProvider = originalProvider;
-            }
+
             return newlist;
         });
 

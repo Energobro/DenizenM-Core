@@ -16,12 +16,10 @@ public abstract class TagContext implements Debuggable, Cloneable {
         boolean showErrors();
     }
 
-    private static boolean defaultShowErrors() {
-        return true;
-    }
+    public static final ShowErrorsMethod DEFAULT_SHOW_ERRORS = () -> true;
 
     public boolean debug;
-    public ShowErrorsMethod showErrors = TagContext::defaultShowErrors;
+    public ShowErrorsMethod showErrors = DEFAULT_SHOW_ERRORS;
     public ScriptEntry entry;
     public ScriptTag script;
     public DefinitionProvider definitionProvider;
