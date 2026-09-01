@@ -8,6 +8,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.CommandExecutor;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.*;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.debugging.Debuggable;
 import com.denizenscript.denizencore.utilities.scheduling.OneTimeSchedulable;
@@ -168,6 +169,11 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     // Note that most tags are safe to read from an async queue, but tags that read live server/world state may return slightly outdated data,
     // or in rare cases may error, as the main thread can be modifying that data at the same moment.
     //
+    // The same caution applies to <context.*> inside an async block: the block inherits the event's context source, so those tags do read there.
+    // Most events store their context at the moment they fire, which is safe to read from any thread.
+    // A minority build it on demand out of a live world object, and reading one of those off-thread races the main thread for that data.
+    // If a block needs event context, read it into a definition on the line before and use the definition inside.
+    //
     // See also <@link language ~waitable> for the simpler option of just moving a single command off-thread with the "~" prefix.
     // -->
 
@@ -252,6 +258,23 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     @Override
+    public ObjectTag getDefinitionObject(StringHolder definition) {
+        if (definition == null) {
+            return null;
+        }
+        if (CoreUtilities.contains(definition.str, '.')) {
+            return getDefinitionObject(definition.str);
+        }
+        if (definition.str.startsWith("__")) {
+            ObjectTag value = DenizenCore.implementation.getSpecialDef(definition.str, this);
+            if (value != null) {
+                return value;
+            }
+        }
+        return definitions.getObject(definition);
+    }
+
+    @Override
     public String getDefinition(String definition) {
         if (definition == null) {
             return null;
@@ -262,6 +285,33 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     @Override
     public boolean hasDefinition(String definition) {
         return getDefinitionObject(definition) != null;
+    }
+
+    /**
+     * Sets a definition using a key the caller has already prepared.
+     * <p>
+     * A name containing '.' falls back to the string path, so this is safe for any name.
+     * Loops use it for their counter, which is written once per iteration and so paid for the key every time.
+     */
+    /** The key every loop writes its index under, prepared once instead of per iteration. */
+    public static final StringHolder LOOP_INDEX_KEY = StringHolder.ofLowered("loop_index");
+
+    public void addDefinition(StringHolder definition, ObjectTag value) {
+        if (CoreUtilities.contains(definition.str, '.')) {
+            // A sub-mapped name has to walk into sub-maps, which a flat key cannot do. Falling back here rather than at every
+            // call site means a prepared key is safe to hand over for any name, and cannot silently write to the wrong place.
+            addDefinition(definition.str, value);
+            return;
+        }
+        if (definition.str.startsWith("__")) {
+            if (DenizenCore.implementation.setSpecialDef(definition.str, this, value)) {
+                return;
+            }
+        }
+        if (trackedDefinitionWrites != null) {
+            trackedDefinitionWrites.add(definition.str);
+        }
+        definitions.putObject(definition, value);
     }
 
     @Override

@@ -2,6 +2,7 @@ package com.denizenscript.denizencore.utilities;
 
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.MapTag;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 public interface DefinitionProvider {
 
@@ -12,6 +13,11 @@ public interface DefinitionProvider {
     MapTag getAllDefinitions();
 
     ObjectTag getDefinitionObject(String definition);
+
+    /** As {@link #getDefinitionObject(String)}, for a key the caller has already prepared. Providers that gain nothing from it may leave this alone. */
+    default ObjectTag getDefinitionObject(StringHolder definition) {
+        return getDefinitionObject(definition.str);
+    }
 
     String getDefinition(String definition);
 

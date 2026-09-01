@@ -4,6 +4,7 @@ import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.tags.TagRunnable;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.tags.TagManager;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.DefinitionProvider;
 
@@ -35,7 +36,8 @@ public class DefinitionTagBase {
                 attribute.echoError("No definitions are provided in this tag's context!");
                 return null;
             }
-            ObjectTag def = definitionProvider.getDefinitionObject(defName.asLowerString());
+            // asLowerString has already lowercased this, so the key does not need scanning again - see StringHolder.ofLowered.
+            ObjectTag def = definitionProvider.getDefinitionObject(StringHolder.ofLowered(defName.asLowerString()));
             if (def == null) {
                 attribute.echoError("Invalid definition name '" + defName + "'.");
                 return null;

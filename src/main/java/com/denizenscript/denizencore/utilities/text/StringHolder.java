@@ -16,6 +16,22 @@ public class StringHolder {
         low = CoreUtilities.toLowerCase(_str);
     }
 
+    /**
+     * For text the caller already knows is lowercase, skipping the scan.
+     * <p>
+     * That scan is not free: for any character above 127 it asks {@link Character#isUpperCase}, which reads the Unicode
+     * property tables. A name in a non-Latin script pays that per character, on every definition read and write.
+     * Only pass text that really is lowercase - nothing checks.
+     */
+    public static StringHolder ofLowered(String alreadyLower) {
+        return new StringHolder(alreadyLower, alreadyLower);
+    }
+
+    public StringHolder(String _str, String _low) {
+        str = _str;
+        low = _low;
+    }
+
     @Override
     public int hashCode() {
         return low.hashCode();
