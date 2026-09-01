@@ -9,6 +9,8 @@ import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.AsciiMatcher;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
+import com.denizenscript.denizencore.utilities.DefinitionProvider;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.utilities.codegen.TagCodeGenerator;
 import com.denizenscript.denizencore.utilities.codegen.TagNamer;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
@@ -370,9 +372,9 @@ public class TagManager {
     }
 
     /** TEMPORARY tag-shape measurement. Remove this block, ReferenceData.shapeKind, and the util.tag_shapes tag together. */
-    public static final java.util.concurrent.atomic.LongAdder[] TAG_SHAPE_COUNTS = new java.util.concurrent.atomic.LongAdder[5];
+    public static final java.util.concurrent.atomic.LongAdder[] TAG_SHAPE_COUNTS = new java.util.concurrent.atomic.LongAdder[7];
 
-    public static final String[] TAG_SHAPE_NAMES = new String[] {"pure_definition", "definition_with_fallback_or_dynamic", "definition_with_subtags", "other_compiled", "other_generic"};
+    public static final String[] TAG_SHAPE_NAMES = new String[] {"pure_definition", "definition_with_fallback_or_dynamic", "definition_with_subtags", "other_compiled", "other_generic", "fast_definition_hit", "subtag_base_refetch"};
 
     static {
         for (int i = 0; i < TAG_SHAPE_COUNTS.length; i++) {
@@ -381,6 +383,8 @@ public class TagManager {
     }
 
     /** TEMPORARY. Runs once per distinct tag, since ReferenceData is cached per tag text - the per-evaluation cost is one array read. */
+    public static boolean fastDefinitionPathEnabled = true;
+
     public static byte classifyTagShape(ReplaceableTagEvent.ReferenceData data) {
         if (data == null || data.attribs == null || data.attribs.attributes.length < 1) {
             return 4;
@@ -399,6 +403,25 @@ public class TagManager {
         return plainName ? (byte) 0 : (byte) 1;
     }
 
+    public static void markPlainDefinitionRead(ReplaceableTagEvent.ReferenceData data) {
+        if (data.compiledStart != null || data.alternative != null || data.value != null || data.skippable != 0 || data.attribs == null) {
+            return;
+        }
+        Attribute.AttributeComponent[] parts = data.attribs.attributes;
+        if (parts.length != 1) {
+            return;
+        }
+        String key = parts[0].key;
+        if (!key.isEmpty() && !key.equals("definition") && !key.equals("def")) {
+            return;
+        }
+        String name = parts[0].rawParam;
+        if (name == null || name.isEmpty() || CoreUtilities.contains(name, '<') || CoreUtilities.contains(name, '&')) {
+            return;
+        }
+        data.plainDefinitionKey = StringHolder.ofLowered(CoreUtilities.toLowerCase(name));
+    }
+
     public static ObjectTag readSingleTagObject(ParseableTagPiece tag, TagContext context) {
         byte shape = tag.tagData == null ? 4 : tag.tagData.shapeKind;
         if (shape < 0) {
@@ -406,7 +429,18 @@ public class TagManager {
             tag.tagData.shapeKind = shape;
         }
         TAG_SHAPE_COUNTS[shape].increment();
-        ReplaceableTagEvent event = new ReplaceableTagEvent(tag.tagData, tag.content, context);
+        ReplaceableTagEvent.ReferenceData data = tag.tagData;
+        if (fastDefinitionPathEnabled && data != null && data.plainDefinitionKey != null && !context.debug && !CoreConfiguration.debugOverride && !CoreConfiguration.debugVerbose) {
+            DefinitionProvider provider = context.definitionProvider;
+            if (provider != null) {
+                ObjectTag definition = provider.getDefinitionObject(data.plainDefinitionKey);
+                if (definition != null) {
+                    TAG_SHAPE_COUNTS[5].increment();
+                    return definition.refreshState();
+                }
+            }
+        }
+        ReplaceableTagEvent event = new ReplaceableTagEvent(data, tag.content, context);
         return readSingleTagObject(context, event);
     }
 
@@ -598,6 +632,7 @@ public class TagManager {
                 else if (!midTag.tagData.noGenerate && midTag.tagData.tagBase != null && midTag.tagData.tagBase.baseForm != null) {
                     midTag.tagData.noGenerate = true;
                     midTag.tagData.compiledStart = TagCodeGenerator.generatePartialTag(midTag, context);
+                    markPlainDefinitionRead(midTag.tagData);
                 }
                 pieces.add(midTag);
                 if (CoreConfiguration.debugVerbose) {

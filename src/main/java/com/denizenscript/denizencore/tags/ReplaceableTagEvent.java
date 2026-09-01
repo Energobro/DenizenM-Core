@@ -23,7 +23,12 @@ public class ReplaceableTagEvent {
 
     public ObjectTag replaced_obj;
 
+    private String unreplacedText;
+
     public ObjectTag getReplacedObj() {
+        if (replaced_obj == null) {
+            replaced_obj = new ElementTag(unreplacedText);
+        }
         return replaced_obj;
     }
 
@@ -48,6 +53,8 @@ public class ReplaceableTagEvent {
         /** TEMPORARY tag-shape measurement, remove with the counters in TagManager. Classified once per distinct tag, -1 until then. */
         public byte shapeKind = -1;
 
+        public com.denizenscript.denizencore.utilities.text.StringHolder plainDefinitionKey = null;
+
         public ObjectTag rawObject = null;
     }
 
@@ -60,7 +67,7 @@ public class ReplaceableTagEvent {
         // If tag is not replaced, return the tag
         // TODO: Possibly make this return "null" ... might break some
         // scripts using tags incorrectly, but makes more sense overall
-        this.replaced_obj = new ElementTag(tag);
+        this.unreplacedText = tag;
         if (ref != null) {
             mainRef = ref;
             core_attributes = new Attribute(ref.attribs, context.entry, context, ref.skippable);
