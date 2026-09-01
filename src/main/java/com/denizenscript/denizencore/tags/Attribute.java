@@ -13,7 +13,7 @@ import com.denizenscript.denizencore.utilities.debugging.Debug;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 
-public class Attribute {
+public class Attribute implements TagContext.ShowErrorsMethod {
 
     public static class AttributeComponent {
 
@@ -174,7 +174,12 @@ public class Attribute {
             context = CoreUtilities.basicContext;
         }
         this.context = context.clone();
-        this.context.showErrors = () -> !hasAlternative();
+        this.context.showErrors = this;
+    }
+
+    @Override
+    public boolean showErrors() {
+        return !hasAlternative();
     }
 
     public Attribute(Attribute ref, ScriptEntry scriptEntry, TagContext context, int skippable) {
@@ -182,7 +187,6 @@ public class Attribute {
         this.scriptEntry = scriptEntry;
         setContext(context);
         attributes = ref.attributes;
-        contexts = new ObjectTag[attributes.length];
         setHadAlternative(ref.hadAlternative);
         if (this.context.debug) {
             filled = new int[attributes.length];
@@ -198,7 +202,6 @@ public class Attribute {
         this.scriptEntry = scriptEntry;
         setContext(context);
         this.attributes = separate_attributes(attributes);
-        contexts = new ObjectTag[this.attributes.length];
         if (this.context.debug) {
             filled = new int[this.attributes.length];
         }
@@ -431,7 +434,7 @@ public class Attribute {
         if (attribute < 0 || attribute >= attributes.length) {
             return null;
         }
-        ObjectTag tagged = contexts[attribute];
+        ObjectTag tagged = contexts == null ? null : contexts[attribute];
         if (tagged != null) {
             return tagged;
         }
@@ -447,6 +450,9 @@ public class Attribute {
             return null;
         }
         tagged = component.paramParsed.parse(context);
+        if (contexts == null) {
+            contexts = new ObjectTag[attributes.length];
+        }
         contexts[attribute] = tagged;
         return tagged;
     }
@@ -651,7 +657,7 @@ public class Attribute {
     public String filledString() {
         StringBuilder sb = new StringBuilder();
         for (int i = 0; i < fulfilled; i++) {
-            if (contexts[i] != null) {
+            if (contexts != null && contexts[i] != null) {
                 sb.append(attributes[i].key).append("[").append(contexts[i]).append("].");
             }
             else {
@@ -667,7 +673,7 @@ public class Attribute {
     public String unfilledString() {
         StringBuilder sb = new StringBuilder();
         for (int i = fulfilled; i < attributes.length; i++) {
-            if (contexts[i] != null) {
+            if (contexts != null && contexts[i] != null) {
                 sb.append(attributes[i].key).append("[").append(contexts[i]).append("].");
             }
             else {
@@ -704,7 +710,7 @@ public class Attribute {
                 sb.append(i < fulfilled ? "<GR>" : (i == fulfilled ? "<LR>" : "<Y>"));
             }
             sb.append(attributes[i].key);
-            if (contexts[i] != null) {
+            if (contexts != null && contexts[i] != null) {
                 sb.append("<LG>[<A>").append(contexts[i]).append("<LG>].");
             }
             else if (attributes[i].rawParam != null) {
