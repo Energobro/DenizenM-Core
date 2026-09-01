@@ -458,6 +458,28 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         }
     }
 
+    /**
+     * Clones this entry with another entry's data, in one step.
+     * <p>
+     * Equivalent to {@code clone()} followed by {@link #copyFrom}, but without cloning this entry's own data and building a tag
+     * context for it first, only to throw both away a line later. Loop bodies are rebuilt this way on every single iteration,
+     * so that discarded pair was one of the most-repeated allocations in the engine.
+     */
+    public ScriptEntry cloneWithDataFrom(ScriptEntry copyFrom) {
+        try {
+            ScriptEntry se = (ScriptEntry) super.clone();
+            se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
+            se.entryData = copyFrom.entryData.clone();
+            se.setSendingQueue(copyFrom.getResidingQueue());
+            se.updateContext();
+            se.entryData.scriptEntry = se;
+            return se;
+        }
+        catch (CloneNotSupportedException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
     public List<Object> getInsideList() {
         if (internal.yamlSubcontent instanceof List) {
             return (List<Object>) internal.yamlSubcontent;

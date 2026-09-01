@@ -117,6 +117,12 @@ public class CommandExecutionGenerator {
         if (givenArg == null) {
             return (ObjectTag) arg.defaultObject;
         }
+        if (arg.getRaw && arg.type == ObjectTag.class && givenArg.hasPrefix() && givenArg.object instanceof ElementTag) {
+            // The rule getElementForPrefix already applies for ElementTag params, extended to a plain ObjectTag one: with
+            // '@ArgRaw', text that happens to contain a colon keeps the colon instead of being split into a prefix nobody
+            // asked for. Restricted to ObjectTag itself because a narrower param type would fail the generated cast.
+            return givenArg.getRawElement();
+        }
         ObjectTag output = givenArg.asType(arg.type);
         if (output == null) {
             throw new InvalidArgumentsRuntimeException("Invalid input to '" + arg.name + "': '" + givenArg.getValue() + "': not a valid " + DebugInternals.getClassNameOpti(arg.type));
