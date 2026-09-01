@@ -1,6 +1,11 @@
 package com.denizenscript.denizencore.scripts.commands.queue;
 
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgRaw;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgLinear;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgDefaultNull;
+import com.denizenscript.denizencore.exceptions.InvalidArgumentsRuntimeException;
 import com.denizenscript.denizencore.objects.Argument;
 import com.denizenscript.denizencore.objects.core.QueueTag;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
@@ -10,6 +15,7 @@ import com.denizenscript.denizencore.utilities.data.DataActionHelper;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.ObjectTag;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.commands.Holdable;
@@ -24,6 +30,8 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         isProcedural = true;
         allowedDynamicPrefixes = true;
         setAsyncWaitable(true);
+        generateDebug = false; // Reported by hand below, to keep the queue in the line as the legacy path did.
+        autoCompile();
     }
 
     // <--[command]
@@ -108,6 +116,25 @@ public class DefineCommand extends AbstractCommand implements Holdable {
     //
     // -->
 
+    /**
+     * The map key for a definition name, cached on the line when the name is fixed text.
+     * <p>
+     * Moving to autoCompile cost the shortcut through {@code Argument.lower_value}, so the name was being lowercased on every
+     * execution again - and for a non-Latin name that reads the Unicode tables per character. A name written as a tag
+     * (<@link tag definition>, eg 'define <[which]> 1') really can differ per run, so only a tagless one is cached.
+     */
+    public static StringHolder keyFor(ScriptEntry scriptEntry, String defName) {
+        if (scriptEntry.internal.specialProcessedData instanceof StringHolder) {
+            return (StringHolder) scriptEntry.internal.specialProcessedData;
+        }
+        StringHolder key = StringHolder.ofLowered(CoreUtilities.toLowerCase(defName));
+        ScriptEntry.InternalArgument[] args = scriptEntry.internal.arguments_to_use;
+        if (args != null && args.length > 0 && args[0].value != null && !args[0].value.hasTag) {
+            scriptEntry.internal.specialProcessedData = key;
+        }
+        return key;
+    }
+
     public static class DefinitionActionProvider extends ActionableDataProvider {
 
         public ScriptQueue queue;
@@ -123,44 +150,32 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         }
     }
 
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("definition")) {
-                if (CoreUtilities.contains(arg.getRawValue(), ':')) {
-                    DefinitionActionProvider provider = new DefinitionActionProvider();
-                    provider.queue = scriptEntry.getResidingQueue();
-                    scriptEntry.addObject("action", DataActionHelper.parse(provider, arg, scriptEntry.context));
-                }
-                else {
-                    scriptEntry.addObject("definition", new ElementTag(CoreUtilities.toLowerCase(arg.getValue())));
-                }
-            }
-            else if (!scriptEntry.hasObject("value")) {
-                scriptEntry.addObject("value", arg.hasPrefix() && arg.object instanceof ElementTag ? arg.getRawElement() : arg.object);
-            }
-            else {
-                arg.reportUnhandled();
-            }
+    public static void autoExecute(ScriptEntry scriptEntry, ScriptQueue queue,
+                                   @ArgLinear @ArgName("definition") @ArgRaw ElementTag definition,
+                                   @ArgLinear @ArgName("value") @ArgRaw @ArgDefaultNull ObjectTag value) {
+        // The legacy path set these through addObject, which stamps the key as the object's prefix - and that prefix is what
+        // Debug.report prints as the label, and what duplicate() carries into the stored definition. Restored by hand here.
+        definition.setPrefix("definition");
+        if (value != null) {
+            value.setPrefix("value");
         }
-        if ((!scriptEntry.hasObject("definition") || !scriptEntry.hasObject("value")) && !scriptEntry.hasObject("action")) {
-            throw new InvalidArgumentsException("Must specify a definition and value!");
-        }
-    }
-
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
-        ElementTag definition = scriptEntry.getElement("definition");
-        ObjectTag value = scriptEntry.getObjectTag("value");
-        ElementTag remove = scriptEntry.getElement("remove");
-        DataAction action = (DataAction) scriptEntry.getObject("action");
-        if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, getName(), new QueueTag(scriptEntry.getResidingQueue()), definition, value, action, remove);
-        }
-        if (action != null) {
+        String defName = definition.asString();
+        if (CoreUtilities.contains(defName, ':')) {
+            DefinitionActionProvider provider = new DefinitionActionProvider();
+            provider.queue = queue;
+            DataAction action = DataActionHelper.parse(provider, defName, scriptEntry.context);
+            if (scriptEntry.dbCallShouldDebug()) {
+                Debug.report(scriptEntry, "DEFINE", new QueueTag(queue), action);
+            }
             action.execute(scriptEntry.getContext());
             return;
         }
-        scriptEntry.getResidingQueue().addDefinition(definition.asString(), value.duplicate());
+        if (value == null) {
+            throw new InvalidArgumentsRuntimeException("Must specify a definition and value!");
+        }
+        if (scriptEntry.dbCallShouldDebug()) {
+            Debug.report(scriptEntry, "DEFINE", new QueueTag(queue), definition, value);
+        }
+        queue.addDefinition(keyFor(scriptEntry, defName), value.duplicate());
     }
 }

@@ -9,6 +9,8 @@ import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.EnumHelper;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
+import com.denizenscript.denizencore.objects.core.ElementTag;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
 
@@ -72,6 +74,8 @@ public class RepeatCommand extends BracedCommand {
         public int index;
         public int target;
         public String valueName;
+
+        public StringHolder valueHolder;
         public ObjectTag originalValue;
 
         public void reapplyAtEnd(ScriptQueue queue) {
@@ -160,10 +164,9 @@ public class RepeatCommand extends BracedCommand {
                     if (scriptEntry.dbCallShouldDebug()) {
                         Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "Repeat loop " + data.index);
                     }
-                    queue.addDefinition(data.valueName, String.valueOf(data.index));
+                    queue.addDefinition(data.valueHolder, new ElementTag(String.valueOf(data.index)));
                     List<ScriptEntry> bracedCommands = BracedCommand.getBracedCommandsDirect(scriptEntry.getOwner(), scriptEntry);
-                    ScriptEntry callbackEntry = scriptEntry.clone();
-                    callbackEntry.copyFrom(scriptEntry);
+                    ScriptEntry callbackEntry = scriptEntry.cloneWithDataFrom(scriptEntry);
                     callbackEntry.setOwner(scriptEntry.getOwner());
                     bracedCommands.add(callbackEntry);
                     for (ScriptEntry cmd : bracedCommands) {
@@ -199,6 +202,7 @@ public class RepeatCommand extends BracedCommand {
             datum.index = from;
             datum.target = datum.index + quantity - 1;
             datum.valueName = asName;
+            datum.valueHolder = new StringHolder(asName);
             scriptEntry.setData(datum);
             ScriptEntry callbackEntry = getCallback(scriptEntry);
             List<ScriptEntry> bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
@@ -207,7 +211,7 @@ public class RepeatCommand extends BracedCommand {
                 return;
             }
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
-            queue.addDefinition(datum.valueName, String.valueOf(datum.index));
+            queue.addDefinition(datum.valueHolder, new ElementTag(String.valueOf(datum.index)));
             callbackEntry.copyFrom(scriptEntry);
             callbackEntry.setOwner(scriptEntry);
             bracedCommandsList.add(callbackEntry);

@@ -65,7 +65,9 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
         for (Argument arg : scriptEntry) {
             if (!scriptEntry.hasObject("definition")
                     && !arg.hasPrefix()) {
-                scriptEntry.addObject("definition", new ElementTag(CoreUtilities.toLowerCase(arg.getValue())));
+                // Argument already lowercased this when it was filled - see Argument.fillStrNoColon and requireValue.
+                arg.requireValue();
+                scriptEntry.addObject("definition", new ElementTag(arg.lower_value));
             }
             else if (arg.hasPrefix()) {
                 value.putObject(arg.getPrefix().getRawValue(), arg.object);

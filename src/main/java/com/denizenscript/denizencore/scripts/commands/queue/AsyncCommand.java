@@ -159,7 +159,7 @@ public class AsyncCommand extends BracedCommand {
             return;
         }
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, "async", db("detached", detached), db("copy_defs", copyDefs));
+            Debug.report(scriptEntry, "ASYNC", db("detached", detached), db("copy_defs", copyDefs));
         }
         ScriptQueue queue = scriptEntry.getResidingQueue();
         List<ScriptEntry> entries = getBracedCommandsDirect(scriptEntry, scriptEntry);

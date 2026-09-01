@@ -1,10 +1,14 @@
 package com.denizenscript.denizencore.scripts.commands.queue;
 
-import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsRuntimeException;
-import com.denizenscript.denizencore.objects.Argument;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.MapTag;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgDefaultNull;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgDefaultText;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgLinear;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
+import com.denizenscript.denizencore.scripts.commands.generator.ArgRaw;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.objects.core.ElementTag;
@@ -24,8 +28,9 @@ public class ForeachCommand extends BracedCommand {
         setSyntax("foreach [stop/next/<object>|...] (as:<name>) (key:<name>) [<commands>]");
         setRequiredArguments(1, 3);
         isProcedural = true;
-        setPrefixesHandled("as", "key");
         setBooleansHandled("stop", "next", "\0callback");
+        generateDebug = false;
+        autoCompile();
         asyncSafe = true; // Only touches its own queue and thread-safe data.
     }
 
@@ -86,6 +91,8 @@ public class ForeachCommand extends BracedCommand {
         public ListTag list;
         public List<String> keys;
         public String valueName, keyName;
+
+        public StringHolder valueHolder, keyHolder;
         public ObjectTag originalValue, originalKeyValue, originalIndexValue;
 
         public void reapplyAtEnd(ScriptQueue queue) {
@@ -97,41 +104,16 @@ public class ForeachCommand extends BracedCommand {
         }
     }
 
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        boolean handled = false;
-        for (Argument arg : scriptEntry) {
-            if (!handled) {
-                if (arg.object instanceof MapTag || arg.object.toString().startsWith("map@")) {
-                    MapTag map = MapTag.getMapFor(arg.object, scriptEntry.context);
-                    if (map == null) {
-                        throw new InvalidArgumentsException("Invalid MapTag specified!");
-                    }
-                    scriptEntry.addObject("map", map);
-                }
-                else {
-                    scriptEntry.addObject("list", arg.object instanceof ListTag ? (ListTag) arg.object : ListTag.valueOf(arg.getRawValue(), scriptEntry.getContext()));
-                }
-                handled = true;
-            }
-            else if (arg.matches("{")) {
-                break;
-            }
-            else {
-                arg.reportUnhandled();
-            }
-        }
-    }
-
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
+    public static void autoExecute(ScriptEntry scriptEntry, ScriptQueue queue,
+                                   @ArgRaw @ArgLinear @ArgName("object") @ArgDefaultNull ObjectTag object,
+                                   @ArgPrefixed @ArgName("as") @ArgDefaultText("value") String asName,
+                                   @ArgPrefixed @ArgName("key") @ArgDefaultText("key") String keyName) {
         boolean stop = scriptEntry.argAsBoolean("stop");
         boolean next = scriptEntry.argAsBoolean("next");
         boolean callback = scriptEntry.argAsBoolean("\0callback");
-        ScriptQueue queue = scriptEntry.getResidingQueue();
         if (stop) {
             if (scriptEntry.dbCallShouldDebug()) {
-                Debug.report(scriptEntry, getName(), db("instruction", "stop"));
+                Debug.report(scriptEntry, "FOREACH", db("instruction", "stop"));
             }
             boolean hasnext = false;
             for (int i = 0; i < queue.getQueueSize(); i++) {
@@ -161,7 +143,7 @@ public class ForeachCommand extends BracedCommand {
         }
         else if (next) {
             if (scriptEntry.dbCallShouldDebug()) {
-                Debug.report(scriptEntry, getName(), db("instruction", "next"));
+                Debug.report(scriptEntry, "FOREACH", db("instruction", "next"));
             }
             boolean hasnext = false;
             for (int i = 0; i < queue.getQueueSize(); i++) {
@@ -197,11 +179,11 @@ public class ForeachCommand extends BracedCommand {
                     if (scriptEntry.dbCallShouldDebug()) {
                         Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "Foreach loop " + data.index);
                     }
-                    queue.addDefinition("loop_index", new ElementTag(data.index));
+                    queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
                     if (data.keys != null) {
-                        queue.addDefinition(data.keyName, new ElementTag(data.keys.get(data.index - 1)));
+                        queue.addDefinition(data.keyHolder, new ElementTag(data.keys.get(data.index - 1)));
                     }
-                    queue.addDefinition(data.valueName, data.list.getObject(data.index - 1));
+                    queue.addDefinition(data.valueHolder, data.list.getObject(data.index - 1));
                     List<ScriptEntry> bracedCommands = BracedCommand.getBracedCommandsDirect(scriptEntry.getOwner(), scriptEntry);
                     ScriptEntry callbackEntry = scriptEntry.clone();
                     callbackEntry.setOwner(scriptEntry.getOwner());
@@ -223,15 +205,28 @@ public class ForeachCommand extends BracedCommand {
             }
         }
         else {
-            ListTag list = scriptEntry.getObjectTag("list");
-            MapTag map = scriptEntry.getObjectTag("map");
-            ElementTag as_name = scriptEntry.argForPrefixAsElement("as", "value");
-            ElementTag key_as = scriptEntry.argForPrefixAsElement("key", "key");
-            if (list == null && map == null) {
+            if (object == null) {
                 throw new InvalidArgumentsRuntimeException("Must specify a quantity or 'stop' or 'next'!");
             }
+            ListTag list = null;
+            MapTag map = null;
+            if (object instanceof MapTag || (!(object instanceof ListTag) && object.toString().startsWith("map@"))) {
+                map = MapTag.getMapFor(object, scriptEntry.context);
+                if (map == null) {
+                    throw new InvalidArgumentsRuntimeException("Invalid MapTag specified!");
+                }
+            }
+            else {
+                list = object instanceof ListTag ? (ListTag) object : ListTag.valueOf(object.toString(), scriptEntry.getContext());
+            }
             if (scriptEntry.dbCallShouldDebug()) {
-                Debug.report(scriptEntry, getName(), map, map == null ? null : key_as, list, as_name);
+                if (map != null) {
+                    map.setPrefix("map");
+                }
+                if (list != null) {
+                    list.setPrefix("list");
+                }
+                Debug.report(scriptEntry, "FOREACH", map, map == null ? null : db("key", keyName), list, db("as", asName));
             }
             int target = list == null ? map.size() : list.size();
             if (target <= 0) {
@@ -255,19 +250,20 @@ public class ForeachCommand extends BracedCommand {
             }
             datum.index = 1;
             scriptEntry.setData(datum);
-            ScriptEntry callbackEntry = new ScriptEntry("FOREACH", new String[]{"\0CALLBACK"},
-                    (scriptEntry.getScript() != null ? scriptEntry.getScript().getContainer() : null));
+            ScriptEntry callbackEntry = getCallback(scriptEntry);
             List<ScriptEntry> bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
             if (bracedCommandsList == null || bracedCommandsList.isEmpty()) {
                 Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
                 return;
             }
             if (datum.keys != null) {
-                datum.keyName = key_as.asString();
+                datum.keyName = keyName;
+                datum.keyHolder = new StringHolder(datum.keyName);
                 datum.originalKeyValue = queue.getDefinitionObject(datum.keyName);
                 queue.addDefinition(datum.keyName, datum.keys.get(0));
             }
-            datum.valueName = as_name.asString();
+            datum.valueName = asName;
+            datum.valueHolder = new StringHolder(datum.valueName);
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
             datum.originalIndexValue = queue.getDefinitionObject("loop_index");
             queue.addDefinition(datum.valueName, datum.list.getObject(0));
@@ -277,10 +273,23 @@ public class ForeachCommand extends BracedCommand {
             bracedCommandsList.add(callbackEntry);
             for (ScriptEntry cmd : bracedCommandsList) {
                 cmd.setInstant(true);
-                cmd.copyFrom(scriptEntry);
             }
             scriptEntry.setInstant(true);
             queue.injectEntriesAtStart(bracedCommandsList);
         }
+    }
+
+    /**
+     * The end-of-loop marker entry, built once per parsed foreach line and cloned per loop.
+     * <p>
+     * Building it was a full {@link ScriptEntry} construction - argument crunching, tag parsing, the braced set - repeated
+     * on every entry into the loop. {@link RepeatCommand#getCallback} already does it this way.
+     */
+    public static ScriptEntry getCallback(ScriptEntry forEntry) {
+        if (forEntry.internal.specialProcessedData == null) {
+            forEntry.internal.specialProcessedData = new ScriptEntry("FOREACH", new String[]{"\0CALLBACK"},
+                    forEntry.getScript() != null ? forEntry.getScript().getContainer() : null);
+        }
+        return ((ScriptEntry) forEntry.internal.specialProcessedData).clone();
     }
 }
