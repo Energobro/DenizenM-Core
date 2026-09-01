@@ -279,12 +279,6 @@ public class ForeachCommand extends BracedCommand {
         }
     }
 
-    /**
-     * The end-of-loop marker entry, built once per parsed foreach line and cloned per loop.
-     * <p>
-     * Building it was a full {@link ScriptEntry} construction - argument crunching, tag parsing, the braced set - repeated
-     * on every entry into the loop. {@link RepeatCommand#getCallback} already does it this way.
-     */
     public static ScriptEntry getCallback(ScriptEntry forEntry) {
         if (forEntry.internal.specialProcessedData == null) {
             forEntry.internal.specialProcessedData = new ScriptEntry("FOREACH", new String[]{"\0CALLBACK"},
