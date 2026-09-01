@@ -61,43 +61,61 @@ public class WhileCommand extends BracedCommand {
         }
     }
 
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        List<String> comparisons = new ArrayList<>();
-        if (scriptEntry.getOriginalArguments().size() == 1) {
-            String arg = scriptEntry.getOriginalArguments().get(0);
-            if (CoreUtilities.equalsIgnoreCase(arg, "stop")) {
-                scriptEntry.addObject("stop", new ElementTag(true));
-            }
-            else if (CoreUtilities.equalsIgnoreCase(arg, "next")) {
-                scriptEntry.addObject("next", new ElementTag(true));
-            }
-            else if (arg.equals("\0CALLBACK")) {
-                scriptEntry.addObject("callback", new ElementTag(true));
-            }
+    /**
+     * The parts of a while line that are the same on every run: which form it is, its comparison arguments, and the compiled condition.
+     * <p>
+     * parseArgs runs before every execution, and a while loop executes it once per iteration through its callback entry, so all of this
+     * was being rebuilt for every turn of every loop even though it is a pure function of the line as written.
+     */
+    public static class ParsedWhile {
+
+        public boolean stop, next, callback;
+
+        public List<String> comparisons;
+
+        /** Held here rather than through IfCommand.conditionFor: that stores a bare Condition in the same slot this holder occupies. */
+        public IfCommand.Condition condition;
+    }
+
+    public static ParsedWhile parsedFor(ScriptEntry entry) {
+        if (entry.internal.specialProcessedData instanceof ParsedWhile) {
+            return (ParsedWhile) entry.internal.specialProcessedData;
         }
-        for (String arg : scriptEntry.getOriginalArguments()) {
+        ParsedWhile parsed = new ParsedWhile();
+        List<String> original = entry.getOriginalArguments();
+        if (original.size() == 1) {
+            String arg = original.get(0);
+            parsed.stop = CoreUtilities.equalsIgnoreCase(arg, "stop");
+            parsed.next = CoreUtilities.equalsIgnoreCase(arg, "next");
+            parsed.callback = arg.equals("\0CALLBACK");
+        }
+        parsed.comparisons = new ArrayList<>();
+        for (String arg : original) {
             if (arg.equals("{")) {
                 break;
             }
-            comparisons.add(arg);
+            parsed.comparisons.add(arg);
         }
-        if (comparisons.isEmpty() && !scriptEntry.hasObject("stop") && !scriptEntry.hasObject("next") && !scriptEntry.hasObject("callback")) {
+        parsed.condition = parsed.comparisons.isEmpty() ? null : IfCommand.ArgComparer.compile(parsed.comparisons);
+        entry.internal.specialProcessedData = parsed;
+        return parsed;
+    }
+
+    @Override
+    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
+        ParsedWhile parsed = parsedFor(scriptEntry);
+        if (parsed.comparisons.isEmpty() && !parsed.stop && !parsed.next && !parsed.callback) {
             throw new InvalidArgumentsException("Must specify a comparison value or 'stop' or 'next'!");
         }
-        scriptEntry.addObject("comparisons", comparisons);
-
     }
 
     @Override
     public void execute(ScriptEntry scriptEntry) {
-        ElementTag stop = scriptEntry.getElement("stop");
-        ElementTag next = scriptEntry.getElement("next");
-        ElementTag callback = scriptEntry.getElement("callback");
+        ParsedWhile parsed = parsedFor(scriptEntry);
         ScriptQueue queue = scriptEntry.getResidingQueue();
-        if (stop != null && stop.asBoolean()) {
+        if (parsed.stop) {
             if (scriptEntry.dbCallShouldDebug()) {
-                Debug.report(scriptEntry, getName(), stop);
+                Debug.report(scriptEntry, getName(), db("stop", true));
             }
             boolean hasnext = false;
             for (int i = 0; i < queue.getQueueSize(); i++) {
@@ -125,9 +143,9 @@ public class WhileCommand extends BracedCommand {
             }
             return;
         }
-        else if (next != null && next.asBoolean()) {
+        else if (parsed.next) {
             if (scriptEntry.dbCallShouldDebug()) {
-                Debug.report(scriptEntry, getName(), next);
+                Debug.report(scriptEntry, getName(), db("next", true));
             }
             boolean hasnext = false;
             for (int i = 0; i < queue.getQueueSize(); i++) {
@@ -153,7 +171,7 @@ public class WhileCommand extends BracedCommand {
             }
             return;
         }
-        else if (callback != null && callback.asBoolean()) {
+        else if (parsed.callback) {
             if (scriptEntry.getOwner() != null && (scriptEntry.getOwner().getCommandName().equals("WHILE") ||
                     scriptEntry.getOwner().getBracedSet() == null || scriptEntry.getOwner().getBracedSet().isEmpty() ||
                     scriptEntry.getBracedSet().get(0).value.get(scriptEntry.getBracedSet().get(0).value.size() - 1) != scriptEntry)) {
@@ -169,15 +187,14 @@ public class WhileCommand extends BracedCommand {
                     data.instaTicks = 0;
                 }
                 data.LastChecked = CoreUtilities.monotonicMillis();
-                boolean run = new IfCommand.ArgComparer().compare(new ArrayList(data.value), scriptEntry);
+                boolean run = parsedFor(scriptEntry.getOwner()).condition.evaluate(scriptEntry);
                 if (run) {
                     if (scriptEntry.dbCallShouldDebug()) {
                         Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "While loop " + data.index);
                     }
-                    queue.addDefinition("loop_index", String.valueOf(data.index));
+                    queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(String.valueOf(data.index)));
                     List<ScriptEntry> bracedCommands = BracedCommand.getBracedCommandsDirect(scriptEntry.getOwner(), scriptEntry);
-                    ScriptEntry callbackEntry = scriptEntry.clone();
-                    callbackEntry.copyFrom(scriptEntry);
+                    ScriptEntry callbackEntry = scriptEntry.cloneWithDataFrom(scriptEntry);
                     callbackEntry.setOwner(scriptEntry.getOwner());
                     bracedCommands.add(callbackEntry);
                     for (int i = 0; i < bracedCommands.size(); i++) {
@@ -197,8 +214,8 @@ public class WhileCommand extends BracedCommand {
             }
         }
         else {
-            List<String> comparisons = (List<String>) scriptEntry.getObject("comparisons");
-            boolean run = new IfCommand.ArgComparer().compare(comparisons, scriptEntry);
+            List<String> comparisons = parsed.comparisons;
+            boolean run = parsed.condition.evaluate(scriptEntry);
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, getName(), db("run_first_loop", run));
             }

@@ -60,7 +60,7 @@ public class WaitUntilCommand extends AbstractCommand implements Holdable {
                                    @ArgUnparsed @ArgNoDebug @ArgRaw @ArgLinear @ArgName("if_comparisons") List<ScriptEntry.InternalArgument> comparisons,
                                    @ArgPrefixed @ArgName("rate") @ArgDefaultNull DurationTag rate,
                                    @ArgPrefixed @ArgName("max") @ArgDefaultNull DurationTag max) {
-        boolean run = new IfCommand.ArgComparer().compare(new ArrayList<>(comparisons), scriptEntry);
+        boolean run = IfCommand.conditionFor(scriptEntry, comparisons).evaluate(scriptEntry);
         if (run) {
             Debug.echoDebug(scriptEntry, "WaitUntil first check already <A>true<W>, not waiting.");
             scriptEntry.setFinished(true);
@@ -94,7 +94,7 @@ public class WaitUntilCommand extends AbstractCommand implements Holdable {
                     scriptEntry.setFinished(true);
                     schedulable.cancel();
                 }
-                if (new IfCommand.ArgComparer().compare(new ArrayList<>(comparisons), scriptEntry)) {
+                if (IfCommand.conditionFor(scriptEntry, comparisons).evaluate(scriptEntry)) {
                     Debug.echoDebug(scriptEntry, "WaitUntil completed after <A>" + counter + "<W> re-checks.");
                     scriptEntry.setFinished(true);
                     schedulable.cancel();

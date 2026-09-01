@@ -2,6 +2,7 @@ package com.denizenscript.denizencore.scripts.commands.queue;
 
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.objects.ObjectTag;
+import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.scripts.commands.Comparable;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
@@ -98,23 +99,94 @@ public class IfCommand extends BracedCommand {
     //
     // -->
 
+    /**
+     * Everything about one if or else line that is the same on every run: how its arguments split, and its compiled condition.
+     * <p>
+     * parseArgs runs before every execution, and all of this used to be rebuilt there each time even though it is a pure
+     * function of the line as written. The lists here are shared between runs, so nothing may modify them.
+     */
+    public static class ParsedIf {
+
+        public boolean hasBrace, hasSubcommand, hasElsecommand;
+
+        public List<String> bracedArgs, comparisons, subcommand, elsecommand;
+
+        /** What BracedData carries as its key. Debug output only, but it was being rebuilt from scratch on every execution. */
+        public String key;
+
+        public Condition condition;
+    }
+
+    /** Splits an if or else line once and caches the result on the entry. {@code leadWord} is what BracedData expects at the front of its args. */
+    public static ParsedIf parsedFor(ScriptEntry entry, String leadWord) {
+        if (entry.internal.specialProcessedData instanceof ParsedIf) {
+            return (ParsedIf) entry.internal.specialProcessedData;
+        }
+        ParsedIf parsed = new ParsedIf();
+        List<String> original = entry.getOriginalArguments();
+        parsed.bracedArgs = new ArrayList<>(original.size() + 1);
+        parsed.bracedArgs.add(leadWord);
+        parsed.bracedArgs.addAll(original);
+        parsed.key = entry.toString();
+        parsed.hasBrace = entry.getInsideList() != null;
+        if (!parsed.hasBrace) {
+            for (String arg : original) {
+                if (arg.equals("{")) {
+                    if (CoreConfiguration.debugVerbose) {
+                        Debug.log("Has_brace = true");
+                    }
+                    parsed.hasBrace = true;
+                    break;
+                }
+            }
+        }
+        parsed.subcommand = new ArrayList<>();
+        parsed.elsecommand = new ArrayList<>();
+        parsed.comparisons = new ArrayList<>();
+        for (String arg : original) {
+            if (arg.equals("{")) {
+                break;
+            }
+            if (!parsed.hasBrace && parsed.hasSubcommand && CoreUtilities.equalsIgnoreCase(arg, "else")) {
+                parsed.hasElsecommand = true;
+                parsed.hasSubcommand = false;
+            }
+            else if (!parsed.hasBrace && !parsed.hasElsecommand && DenizenCore.commandRegistry.get(CoreUtilities.toUpperCase(arg)) != null) {
+                Deprecations.ifCommandSingleLine.warn(entry);
+                parsed.hasSubcommand = true;
+                parsed.subcommand.add(arg);
+            }
+            else if (!parsed.hasBrace && parsed.hasSubcommand) {
+                parsed.subcommand.add(arg);
+            }
+            else if (!parsed.hasBrace && parsed.hasElsecommand) {
+                parsed.elsecommand.add(arg);
+            }
+            else {
+                parsed.comparisons.add(arg);
+            }
+        }
+        // An "else" with no "if" after it has no condition of its own - it is the fallback branch.
+        List<String> conditionArgs = leadWord.equals("else") ? (parsed.bracedArgs.size() > 2 ? parsed.bracedArgs.subList(2, parsed.bracedArgs.size()) : null) : parsed.comparisons;
+        parsed.condition = conditionArgs == null ? null : ArgComparer.compile(conditionArgs);
+        entry.internal.specialProcessedData = parsed;
+        return parsed;
+    }
+
     @Override
     public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        boolean has_brace = scriptEntry.getInsideList() != null;
-        if (has_brace) {
+        ParsedIf parsed = parsedFor(scriptEntry, "if");
+        boolean has_brace = parsed.hasBrace;
+        if (scriptEntry.getInsideList() != null) {
             // 'false' - the body is NOT cloned here. parseArgs runs on every execution, and cloning every line of every branch before the
             // condition has even been read costs a ScriptEntry clone per line whether that branch runs or not. execute clones the one branch
             // it picks, through BracedCommand.duplicateBracedSection.
-            // 'args' is still rebuilt per execution, and must be: execute hands a subList of it to ArgComparer, which rewrites the list it is
-            // given while crunching parentheses - so a shared copy would be corrupted by the first else-if that uses them.
             List<BracedData> allData = new ArrayList<>();
             BracedData ifRef = new BracedData();
             ifRef.entry = scriptEntry;
             ifRef.value = getBracedCommands(scriptEntry, false).get(0).value;
-            ifRef.key = scriptEntry.toString();
-            ifRef.args = new ArrayList<>();
-            ifRef.args.add("if");
-            ifRef.args.addAll(scriptEntry.getOriginalArguments());
+            ifRef.key = parsed.key;
+            ifRef.args = parsed.bracedArgs;
             allData.add(ifRef);
             while (scriptEntry.getResidingQueue().script_entries.size() > 0) {
                 ScriptEntry nextEntry = scriptEntry.getResidingQueue().script_entries.get(0);
@@ -132,63 +204,23 @@ public class IfCommand extends BracedCommand {
                 BracedData elseRef = new BracedData();
                 elseRef.value = getBracedCommands(nextEntry, false).get(0).value;
                 elseRef.entry = nextEntry;
-                elseRef.key = nextEntry.toString();
-                elseRef.args = new ArrayList<>();
-                elseRef.args.add("else");
-                elseRef.args.addAll(nextEntry.getOriginalArguments());
+                ParsedIf elseParsed = parsedFor(nextEntry, "else");
+                elseRef.key = elseParsed.key;
+                elseRef.args = elseParsed.bracedArgs;
                 allData.add(elseRef);
             }
             scriptEntry.addObject("braces", allData);
         }
-        else {
-            for (String arg : scriptEntry.getOriginalArguments()) {
-                if (arg.equals("{")) {
-                    if (CoreConfiguration.debugVerbose) {
-                        Debug.log("Has_brace = true");
-                    }
-                    has_brace = true;
-                    break;
-                }
-            }
-            if (has_brace) {
-                scriptEntry.addObject("braces", getBracedCommands(scriptEntry, false));
-            }
+        else if (has_brace) {
+            scriptEntry.addObject("braces", getBracedCommands(scriptEntry, false));
         }
-        boolean in_subcommand = false;
-        boolean in_elsecommand = false;
-        List<String> subcommand = new ArrayList<>();
-        List<String> elsecommand = new ArrayList<>();
-        List<String> comparisons = new ArrayList<>();
-        for (String arg : scriptEntry.getOriginalArguments()) {
-            if (arg.equals("{")) {
-                break;
-            }
-            if (!has_brace && in_subcommand && CoreUtilities.equalsIgnoreCase(arg, "else")) {
-                in_elsecommand = true;
-                in_subcommand = false;
-            }
-            else if (!has_brace && !in_elsecommand && DenizenCore.commandRegistry.get(CoreUtilities.toUpperCase(arg)) != null) {
-                Deprecations.ifCommandSingleLine.warn(scriptEntry);
-                in_subcommand = true;
-                subcommand.add(arg);
-            }
-            else if (!has_brace && in_subcommand) {
-                subcommand.add(arg);
-            }
-            else if (!has_brace && in_elsecommand) {
-                elsecommand.add(arg);
-            }
-            else {
-                comparisons.add(arg);
-            }
+        if (!has_brace && parsed.hasElsecommand) {
+            scriptEntry.addObject("elsecommand", parsed.elsecommand);
         }
-        if (!has_brace && in_elsecommand) {
-            scriptEntry.addObject("elsecommand", elsecommand);
+        if (!has_brace && (parsed.hasSubcommand || parsed.hasElsecommand)) {
+            scriptEntry.addObject("subcommand", parsed.subcommand);
         }
-        if (!has_brace && (in_subcommand || in_elsecommand)) {
-            scriptEntry.addObject("subcommand", subcommand);
-        }
-        scriptEntry.addObject("comparisons", comparisons);
+        scriptEntry.addObject("comparisons", parsed.comparisons);
     }
 
     @Override
@@ -203,7 +235,7 @@ public class IfCommand extends BracedCommand {
         if (CoreConfiguration.debugVerbose) {
             Debug.log("comparisons=" + comparisons + ", sc:" + subcommand + ", ec:" + elsecommand);
         }
-        boolean first_set = new ArgComparer().compare(comparisons, scriptEntry);
+        boolean first_set = parsedFor(scriptEntry, "if").condition.evaluate(scriptEntry);
         if (first_set && subcommand != null && subcommand.size() > 0) {
             executeCommandList(subcommand, scriptEntry);
             return;
@@ -250,7 +282,19 @@ public class IfCommand extends BracedCommand {
                             Debug.echoError("Else command has argument '" + key.get(1) + "' which is unknown.");
                             continue;
                         }
-                        if (!new ArgComparer().compare(key.subList(2, key.size()), braceSet.entry)) {
+                        // Only trust the entry's cache when this really is the args list it was built from - the legacy brace path
+                        // hands over BracedData that this command did not assemble, and its entry may be someone else entirely.
+                        Condition elseCondition = null;
+                        if (braceSet.entry != null && braceSet.entry.internal.specialProcessedData instanceof ParsedIf) {
+                            ParsedIf elseParsed = (ParsedIf) braceSet.entry.internal.specialProcessedData;
+                            if (elseParsed.bracedArgs == key) {
+                                elseCondition = elseParsed.condition;
+                            }
+                        }
+                        if (elseCondition == null) {
+                            elseCondition = ArgComparer.compile(key.subList(2, key.size()));
+                        }
+                        if (!elseCondition.evaluate(braceSet.entry)) {
                             continue;
                         }
                         Debug.echoDebug(scriptEntry, "<Y>If/else-if chain entry #" + (z + 1) + " passed, running block.");
@@ -279,8 +323,11 @@ public class IfCommand extends BracedCommand {
         try {
             scriptEntry.setInstant(true);
             String cmd = subcommand.get(0);
-            subcommand.remove(0);
-            ScriptEntry entry = new ScriptEntry(cmd, subcommand.toArray(new String[0]), scriptEntry.getScript() != null ? scriptEntry.getScript().getContainer() : null);
+            String[] cmdArgs = new String[subcommand.size() - 1];
+            for (int i = 1; i < subcommand.size(); i++) {
+                cmdArgs[i - 1] = subcommand.get(i);
+            }
+            ScriptEntry entry = new ScriptEntry(cmd, cmdArgs, scriptEntry.getScript() != null ? scriptEntry.getScript().getContainer() : null);
             entry.entryData = scriptEntry.entryData.clone();
             entry.updateContext();
             entry.setInstant(true);
@@ -291,22 +338,34 @@ public class IfCommand extends BracedCommand {
         }
     }
 
-    public static class ArgComparer {
+    /**
+     * A condition compiled out of an argument list once, then evaluated as many times as the line runs.
+     * <p>
+     * Compiling separates the two halves of what {@link ArgComparer} used to do on every execution: finding the structure
+     * (parentheses, operators, comparison shape) and reading the values. Only the second half depends on the run,
+     * so the first is done once and cached on the entry - see {@link #conditionFor}.
+     */
+    public interface Condition {
 
-        List argstemp = null;
+        boolean evaluate(ScriptEntry scriptEntry);
+    }
 
-        ArgInternal[] argstemp_parsed = null;
-
-        ScriptEntry scriptEntry = null;
-
-        Boolean result = null;
-
-        boolean flip = false;
-
-        @Override
-        public String toString() {
-            return "[ArgComp: " + argstemp + " res " + result + "]";
+    /**
+     * Returns the compiled condition for an entry, compiling it on the first run and reusing it after.
+     * <p>
+     * A compiled condition only reads, so one instance is safe to share between the queues running the same script,
+     * including off-thread ones - which is why it can live on the entry's shared internal data.
+     */
+    public static Condition conditionFor(ScriptEntry cacheEntry, List args) {
+        if (cacheEntry.internal.specialProcessedData instanceof Condition) {
+            return (Condition) cacheEntry.internal.specialProcessedData;
         }
+        Condition compiled = ArgComparer.compile(args);
+        cacheEntry.internal.specialProcessedData = compiled;
+        return compiled;
+    }
+
+    public static class ArgComparer {
 
         public static class ArgInternal {
 
@@ -334,9 +393,6 @@ public class IfCommand extends BracedCommand {
             else if (arg instanceof ArgInternal) {
                 return arg.toString();
             }
-            else if (arg instanceof ArgComparer) {
-                return ((ArgComparer) arg).compare() ? "true" : "false";
-            }
             else if (arg instanceof Boolean) {
                 return ((Boolean) arg) ? "true" : "false";
             }
@@ -353,7 +409,7 @@ public class IfCommand extends BracedCommand {
             else if (arg instanceof ArgInternal) {
                 return arg.toString();
             }
-            else if (arg instanceof ArgComparer) {
+            else if (arg instanceof Condition) {
                 return "<UnTaggedComparison>";
             }
             else if (arg instanceof Boolean) {
@@ -362,31 +418,7 @@ public class IfCommand extends BracedCommand {
             return arg.toString();
         }
 
-        public boolean tagbool(int arg, boolean canNegate) {
-            if (argstemp_parsed[arg] != null) {
-                return argstemp_parsed[arg].boolify();
-            }
-            Object argObj = argstemp.get(arg);
-            if (argObj instanceof String) {
-                return tagify((String) argObj, canNegate).boolify();
-            }
-            else if (argObj instanceof ScriptEntry.InternalArgument) {
-                // TODO: Special case tag parsing
-                return tagify(((ScriptEntry.InternalArgument) argObj).fullOriginalRawValue, canNegate).boolify();
-            }
-            else if (argObj instanceof ArgInternal) {
-                return ((ArgInternal) argObj).boolify();
-            }
-            else if (argObj instanceof ArgComparer) {
-                return ((ArgComparer) argObj).compare();
-            }
-            else if (argObj instanceof Boolean) {
-                return ((Boolean) argObj);
-            }
-            return tagify(argObj.toString(), canNegate).boolify();
-        }
-
-        public ArgInternal tagify(String arg, boolean canNegate) {
+        public static ArgInternal tagify(ScriptEntry scriptEntry, String arg, boolean canNegate) {
             ArgInternal toRet = new ArgInternal();
             if (arg.startsWith("!") && canNegate) {
                 toRet.negative = true;
@@ -396,88 +428,72 @@ public class IfCommand extends BracedCommand {
             return toRet;
         }
 
-        public ArgInternal tagme(int arg, boolean canNegate) {
-            if (argstemp_parsed[arg] != null) {
-                return argstemp_parsed[arg];
+        public static ArgInternal tagme(ScriptEntry scriptEntry, Object argObj, boolean canNegate) {
+            if (argObj instanceof String) {
+                return tagify(scriptEntry, (String) argObj, canNegate);
             }
-            ArgInternal got = tagify(procString(argstemp.get(arg)), canNegate);
-            argstemp_parsed[arg] = got;
-            return got;
+            else if (argObj instanceof ScriptEntry.InternalArgument) {
+                // TODO: Special case tag parsing
+                return tagify(scriptEntry, ((ScriptEntry.InternalArgument) argObj).fullOriginalRawValue, canNegate);
+            }
+            else if (argObj instanceof ArgInternal) {
+                return (ArgInternal) argObj;
+            }
+            return tagify(scriptEntry, procString(argObj), canNegate);
         }
 
-        public ArgComparer construct(List args, ScriptEntry scriptEntry) {
-            argstemp = args;
-            argstemp_parsed = new ArgInternal[args.size()];
-            this.scriptEntry = scriptEntry;
-            return this;
+        public static boolean tagbool(ScriptEntry scriptEntry, Object argObj, boolean canNegate) {
+            if (argObj instanceof Condition) {
+                return ((Condition) argObj).evaluate(scriptEntry);
+            }
+            else if (argObj instanceof Boolean) {
+                return (Boolean) argObj;
+            }
+            return tagme(scriptEntry, argObj, canNegate).boolify();
         }
 
-        public boolean compare(List args, ScriptEntry scriptEntry) {
-            construct(args, scriptEntry);
-            return compare();
+        /** Reads one element as an object for a comparison. A crunched parenthesis group reduces to its own boolean first. */
+        public static ObjectTag tagvalue(ScriptEntry scriptEntry, Object argObj) {
+            if (argObj instanceof Condition) {
+                return new ElementTag(((Condition) argObj).evaluate(scriptEntry));
+            }
+            return tagme(scriptEntry, argObj, false).value;
         }
 
-        public boolean compare() {
-            if (result == null) {
-                result = compareInternal();
-                if (flip) {
-                    result = !result;
-                }
+        /**
+         * Builds the condition tree for an argument list.
+         * <p>
+         * The structure decisions here are the ones the old per-execution walk made, in the same order and with the same
+         * outcomes: parentheses are crunched left to right, then the list is split at the FIRST of '||'/'or'/'&&'/'and'
+         * that appears. That split is deliberately without precedence between the two - it is what every existing script
+         * was written against, and it is why the command's docs require grouping when both are used on one line.
+         */
+        public static Condition compile(List args) {
+            if (args == null || args.isEmpty()) {
+                return scriptEntry -> false;
             }
-            return result;
-        }
-
-        public boolean compareInternal() {
-            List args = argstemp;
-            if (CoreConfiguration.debugVerbose) {
-                Debug.log("Comparing " + args);
+            if (args.size() == 1) {
+                Object only = args.get(0);
+                return scriptEntry -> tagbool(scriptEntry, only, true);
             }
-            if (args.isEmpty()) {
-                if (CoreConfiguration.debugVerbose) {
-                    Debug.log("Args.size == 0, return false");
-                }
-                return false;
-            }
-            else if (args.size() == 1) {
-                if (CoreConfiguration.debugVerbose) {
-                    Debug.log("Returning comparison for " + args.get(0));
-                }
-                return tagbool(0, true);
-            }
+            List crunched = null;
             for (int i = 0; i < args.size(); i++) {
-                String arg = procStringNoTag(args.get(i));
+                Object rawArg = args.get(i);
+                String arg = procStringNoTag(rawArg);
                 if (arg.equals("(") || arg.equals("!(")) {
                     List subargs = new ArrayList(args.size());
                     int count = 0;
-                    boolean found = false;
+                    int close = -1;
                     for (int x = i + 1; x < args.size(); x++) {
                         String xarg = procStringNoTag(args.get(x));
                         if (xarg.equals("(") || xarg.equals("!(")) {
                             count++;
                             subargs.add(xarg);
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.log("Open paren");
-                            }
                         }
                         else if (xarg.equals(")")) {
-                            if (CoreConfiguration.debugVerbose) {
-                                Debug.log("Close paren");
-                            }
                             count--;
                             if (count == -1) {
-                                if (CoreConfiguration.debugVerbose) {
-                                    Debug.log("Crunch");
-                                }
-                                ArgComparer comp = new ArgComparer().construct(subargs, scriptEntry);
-                                comp.flip = arg.startsWith("!");
-                                for (int c = 0; c < (x - i) + 1; c++) {
-                                    args.remove(i);
-                                }
-                                args.add(i, comp);
-                                found = true;
-                                if (CoreConfiguration.debugVerbose) {
-                                    Debug.log("Shrunk to " + args);
-                                }
+                                close = x;
                                 break;
                             }
                             else {
@@ -488,91 +504,50 @@ public class IfCommand extends BracedCommand {
                             subargs.add(args.get(x));
                         }
                     }
-                    if (!found) {
-                        if (CoreConfiguration.debugVerbose) {
-                            Debug.log("Returning false: strange(unfound) ()");
-                        }
-                        return false;
+                    if (close == -1) {
+                        return scriptEntry -> false;
                     }
+                    Condition sub = compile(subargs);
+                    Condition group = arg.startsWith("!") ? (scriptEntry -> !sub.evaluate(scriptEntry)) : sub;
+                    if (crunched == null) {
+                        crunched = new ArrayList(args.size());
+                        crunched.addAll(args.subList(0, i));
+                    }
+                    crunched.add(group);
+                    i = close;
                 }
                 else if (arg.equals(")")) {
-                    if (CoreConfiguration.debugVerbose) {
-                        Debug.log("Returning false: strange(stray) ()");
-                    }
-                    return false;
+                    return scriptEntry -> false;
+                }
+                else if (crunched != null) {
+                    crunched.add(rawArg);
                 }
             }
+            if (crunched != null) {
+                args = crunched;
+            }
             if (args.size() == 1) {
-                if (CoreConfiguration.debugVerbose) {
-                    Debug.log("Returning comparison for " + args.get(0));
-                }
-                return tagbool(0, true);
+                Object only = args.get(0);
+                return scriptEntry -> tagbool(scriptEntry, only, true);
             }
             for (int i = 0; i < args.size(); i++) {
-                String arg = procStringNoTag(args.get(i));
-                String argLow = CoreUtilities.toLowerCase(arg);
-                if (argLow.equals("||") || argLow.equals("or")) {
-                    List beforeargs = new ArrayList(i);
-                    for (int x = 0; x < i; x++) {
-                        beforeargs.add(args.get(x));
+                String argLow = CoreUtilities.toLowerCase(procStringNoTag(args.get(i)));
+                boolean isOr = argLow.equals("||") || argLow.equals("or");
+                if (isOr || argLow.equals("&&") || argLow.equals("and")) {
+                    Condition before = compile(new ArrayList(args.subList(0, i)));
+                    Condition after = compile(new ArrayList(args.subList(i + 1, args.size())));
+                    if (isOr) {
+                        return scriptEntry -> before.evaluate(scriptEntry) || after.evaluate(scriptEntry);
                     }
-                    boolean before = new ArgComparer().compare(beforeargs, scriptEntry);
-                    if (before) {
-                        if (CoreConfiguration.debugVerbose) {
-                            Debug.log("Returning true because true || irrel");
-                        }
-                        return true;
-                    }
-                    List afterargs = new ArrayList(args.size() - (i + 1));
-                    for (int x = i + 1; x < args.size(); x++) {
-                        afterargs.add(args.get(x));
-                    }
-                    boolean comp = new ArgComparer().compare(afterargs, scriptEntry);
-                    if (CoreConfiguration.debugVerbose) {
-                        Debug.log("Returning || comparison: " + comp);
-                    }
-                    return comp;
+                    return scriptEntry -> before.evaluate(scriptEntry) && after.evaluate(scriptEntry);
                 }
-                else if (argLow.equals("&&") || argLow.equals("and")) {
-                    List beforeargs = new ArrayList(i);
-                    for (int x = 0; x < i; x++) {
-                        beforeargs.add(args.get(x));
-                    }
-                    boolean before = new ArgComparer().compare(beforeargs, scriptEntry);
-                    if (!before) {
-                        if (CoreConfiguration.debugVerbose) {
-                            Debug.log("Returning false because false && irrel");
-                        }
-                        return false;
-                    }
-                    List afterargs = new ArrayList(args.size() - (i + 1));
-                    for (int x = i + 1; x < args.size(); x++) {
-                        afterargs.add(args.get(x));
-                    }
-                    boolean comp = new ArgComparer().compare(afterargs, scriptEntry);
-                    if (CoreConfiguration.debugVerbose) {
-                        Debug.log("Returning && comparison: " + comp);
-                    }
-                    return comp;
-                }
-            }
-            if (args.size() == 1) {
-                if (CoreConfiguration.debugVerbose) {
-                    Debug.log("Returning comparison for " + args.get(0));
-                }
-                return tagbool(0, true);
             }
             if (args.size() == 2) {
                 if (CoreUtilities.toLowerCase(procStringNoTag(args.get(0))).equals("not")) {
-                    if (CoreConfiguration.debugVerbose) {
-                        Debug.log("Returning negative comparison for " + args.get(0));
-                    }
-                    return !tagbool(1, false);
+                    Object only = args.get(1);
+                    return scriptEntry -> !tagbool(scriptEntry, only, false);
                 }
-                if (CoreConfiguration.debugVerbose) {
-                    Debug.log("Returning false because two args only (non-processable)");
-                }
-                return false;
+                return scriptEntry -> false;
             }
             String operatorArg;
             boolean negative = false;
@@ -588,31 +563,52 @@ public class IfCommand extends BracedCommand {
                 }
             }
             else {
-                Debug.echoError(scriptEntry, "If command syntax invalid - too many arguments? Found " + args.size() + " args: " + args);
-                return false;
-            }
-            try {
-                Comparable.Operator operator = Comparable.getOperatorFor(operatorArg);
-                if (operator == null) {
-                    Debug.echoError(scriptEntry, "If command syntax invalid - invalid operator '" + operatorArg + "'");
+                String found = args.size() + " args: " + args;
+                return scriptEntry -> {
+                    Debug.echoError(scriptEntry, "If command syntax invalid - too many arguments? Found " + found);
                     return false;
-                }
-                ObjectTag first = tagme(0, false).value;
-                ObjectTag second = tagme(args.size() - 1, false).value;
-                boolean outcome = Comparable.compare(first, second, operator, negative, scriptEntry.context);
-                if (scriptEntry.dbCallShouldDebug()) {
-                    Debug.echoDebug(scriptEntry, "Comparing if " + first + (negative ? " not " : " ") + operator.name() + " " + second + " ... " + outcome);
-                }
-                return outcome;
+                };
+            }
+            Comparable.Operator operator;
+            try {
+                operator = Comparable.getOperatorFor(operatorArg);
             }
             catch (Throwable ex) {
-                Debug.echoError(scriptEntry, "If command syntax invalid - possibly wrong number of arguments (check for stray spaces)? exception: " + ex.getClass().getName() + ": " + ex.getMessage());
-                if (CoreConfiguration.debugVerbose) {
-                    Debug.echoError("Was comparing " + operatorArg + " with " + args.get(0) + " and " + args.get(2));
-                    Debug.echoError(ex);
-                }
-                return false;
+                operator = null;
             }
+            if (operator == null) {
+                String badOperator = operatorArg;
+                return scriptEntry -> {
+                    Debug.echoError(scriptEntry, "If command syntax invalid - invalid operator '" + badOperator + "'");
+                    return false;
+                };
+            }
+            Object leftArg = args.get(0), rightArg = args.get(args.size() - 1);
+            Comparable.Operator finalOperator = operator;
+            boolean finalNegative = negative;
+            return scriptEntry -> {
+                try {
+                    ObjectTag first = tagvalue(scriptEntry, leftArg);
+                    ObjectTag second = tagvalue(scriptEntry, rightArg);
+                    boolean outcome = Comparable.compare(first, second, finalOperator, finalNegative, scriptEntry.context);
+                    if (scriptEntry.dbCallShouldDebug()) {
+                        Debug.echoDebug(scriptEntry, "Comparing if " + first + (finalNegative ? " not " : " ") + finalOperator.name() + " " + second + " ... " + outcome);
+                    }
+                    return outcome;
+                }
+                catch (Throwable ex) {
+                    Debug.echoError(scriptEntry, "If command syntax invalid - possibly wrong number of arguments (check for stray spaces)? exception: " + ex.getClass().getName() + ": " + ex.getMessage());
+                    if (CoreConfiguration.debugVerbose) {
+                        Debug.echoError(ex);
+                    }
+                    return false;
+                }
+            };
+        }
+
+        /** Compiles and evaluates in one go, for callers that have nowhere to cache the compiled form. */
+        public boolean compare(List args, ScriptEntry scriptEntry) {
+            return compile(args).evaluate(scriptEntry);
         }
     }
 }
