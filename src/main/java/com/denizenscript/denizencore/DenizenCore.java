@@ -251,6 +251,7 @@ public class DenizenCore {
             for (ScriptContainer container : ScriptRegistry.scriptContainers.values()) {
                 container.postCheck();
             }
+            implementation.onScriptsBuilt();
             ScriptEvent.reload();
             implementation.onScriptReload();
             lastReloadTime = CoreUtilities.monotonicMillis();

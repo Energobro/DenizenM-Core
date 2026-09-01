@@ -49,6 +49,15 @@ public interface DenizenImplementation {
     void onScriptReload();
 
     /**
+     * Called once the new script set is built but before event paths are re-checked.
+     * <p>
+     * Anything an implementation loads behind a double buffer has to be published here, not in {@link #onScriptReload()}:
+     * event path validation reads those sets, and by onScriptReload it has already run against the previous load's data.
+     */
+    default void onScriptsBuilt() {
+    }
+
+    /**
      * Return an empty ScriptEntryData object of the implementation's variety.
      * This is to avoid casting issues when ScriptEntry's use generic data objects.
      */
