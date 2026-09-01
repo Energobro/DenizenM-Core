@@ -45,6 +45,9 @@ public class DefinitionTagBase {
             if (attribute.attributes.length == 1) {
                 return def.refreshState();
             }
+            if (def instanceof ElementTag element && !element.isPlainText) {
+                TagManager.TAG_SHAPE_COUNTS[6].increment();
+            }
             return CoreUtilities.fixType(def, attribute.context);
         };
         TagManager.registerTagHandler(ObjectTag.class, ElementTag.class, "def", defTag);

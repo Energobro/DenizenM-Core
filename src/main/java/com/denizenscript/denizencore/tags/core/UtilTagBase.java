@@ -881,7 +881,14 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
         // TEMPORARY tag-shape measurement, remove together with TagManager.TAG_SHAPE_COUNTS.
         // <util.tag_shapes> reads the counts, <util.tag_shapes[reset]> zeroes them first.
         tagProcessor.registerTag(MapTag.class, "tag_shapes", (attribute, object) -> {
-            boolean reset = attribute.hasParam() && CoreUtilities.equalsIgnoreCase(attribute.getParam(), "reset");
+            String param = attribute.hasParam() ? CoreUtilities.toLowerCase(attribute.getParam()) : "";
+            boolean reset = param.equals("reset");
+            if (param.equals("off")) {
+                TagManager.fastDefinitionPathEnabled = false;
+            }
+            else if (param.equals("on")) {
+                TagManager.fastDefinitionPathEnabled = true;
+            }
             MapTag result = new MapTag();
             long total = 0;
             for (int i = 0; i < TagManager.TAG_SHAPE_COUNTS.length; i++) {
@@ -890,6 +897,7 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
                 result.putObject(TagManager.TAG_SHAPE_NAMES[i], new ElementTag(value));
             }
             result.putObject("total", new ElementTag(total));
+            result.putObject("fast_path_enabled", new ElementTag(TagManager.fastDefinitionPathEnabled));
             if (reset) {
                 for (java.util.concurrent.atomic.LongAdder counter : TagManager.TAG_SHAPE_COUNTS) {
                     counter.reset();
