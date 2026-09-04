@@ -290,12 +290,12 @@ public class DenizenCore {
     /** Returns true if called from the thread that DenizenCore understands to be the main thread, or false if on a different thread. */
     public static boolean isMainThread() {
         Thread curThread = Thread.currentThread();
-        return curThread.equals(MAIN_THREAD) || curThread.equals(TagManager.tagThread);
+        return curThread == MAIN_THREAD || curThread == TagManager.tagThread;
     }
 
     /** Returns true if called from the literal main thread (unlike {@link #isMainThread()}, this ignores the tag-timeout helper thread). */
     public static boolean isStrictlyMainThread() {
-        return Thread.currentThread().equals(MAIN_THREAD);
+        return Thread.currentThread() == MAIN_THREAD;
     }
 
     /** Runs the task immediately if called on main thread, or at the start of the next tick if called off-thread. */
