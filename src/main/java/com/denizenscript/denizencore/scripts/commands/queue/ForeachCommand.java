@@ -110,7 +110,6 @@ public class ForeachCommand extends BracedCommand {
                                    @ArgPrefixed @ArgName("key") @ArgDefaultText("key") String keyName) {
         boolean stop = scriptEntry.argAsBoolean("stop");
         boolean next = scriptEntry.argAsBoolean("next");
-        boolean callback = scriptEntry.argAsBoolean("\0callback");
         if (stop) {
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, "FOREACH", db("instruction", "stop"));
@@ -137,9 +136,6 @@ public class ForeachCommand extends BracedCommand {
                 Debug.echoError(scriptEntry, "Cannot 'foreach next': not in one!");
             }
             return;
-        }
-        else if (callback) {
-            Debug.echoError(scriptEntry, "Foreach CALLBACK invalid: loops no longer run through callback entries.");
         }
         else {
             if (object == null) {

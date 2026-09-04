@@ -13,6 +13,7 @@ import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.tags.TagManager;
 
+import java.util.List;
 import java.util.function.Consumer;
 
 public class CommandExecutor {
@@ -249,7 +250,9 @@ public class CommandExecutor {
         try {
             TagContext context = scriptEntry.getContext();
             Debug.setCurrentContext(context);
-            for (Argument arg : scriptEntry.internal.preprocArgs) {
+            List<Argument> preprocArgs = scriptEntry.internal.preprocArgs;
+            for (int i = 0; i < preprocArgs.size(); i++) {
+                Argument arg = preprocArgs.get(i);
                 if (DenizenCore.implementation.handleCustomArgs(scriptEntry, arg)) {
                     // Do nothing
                 }
