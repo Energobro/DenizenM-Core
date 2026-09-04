@@ -97,7 +97,7 @@ public class DebugInternals {
             headerBuilder.append(" in script '<A>").append(sourceScript.getName()).append("<LR>'");
         }
         if (sourceQueue != null) {
-            headerBuilder.append(" in queue '").append(sourceQueue.debugId).append("<LR>'");
+            headerBuilder.append(" in queue '").append(sourceQueue.getDebugId()).append("<LR>'");
         }
         if (source != null) {
             headerBuilder.append(" while executing command '<A>").append(source.getCommandName()).append("<LR>'");
@@ -128,7 +128,7 @@ public class DebugInternals {
             }
             else if (context instanceof ScriptQueue queue) {
                 if (context != sourceQueue) {
-                    headerBuilder.append(" in queue '").append(queue.debugId).append("<LR>'");
+                    headerBuilder.append(" in queue '").append(queue.getDebugId()).append("<LR>'");
                 }
             }
             else if (context instanceof String str) {

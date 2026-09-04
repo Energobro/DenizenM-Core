@@ -141,8 +141,7 @@ public class AsyncCommand extends BracedCommand {
                                    @ArgPrefixed @ArgName("copy_defs") @ArgDefaultNull ListTag copyDefs) {
         if (scriptEntry.argAsBoolean("\0callback")) {
             ScriptEntry owner = scriptEntry.getOwner();
-            if (owner != null && owner.getData() instanceof AsyncData) {
-                AsyncData data = (AsyncData) owner.getData();
+            if (owner != null && scriptEntry.getData() instanceof AsyncData data) {
                 data.reachedEnd = true;
                 // Reaching the marker means the block ran to its end, so this is the honest cost of its contents,
                 // measured the same way whether it ran on a worker or inline.
@@ -162,19 +161,32 @@ public class AsyncCommand extends BracedCommand {
             Debug.report(scriptEntry, "ASYNC", db("detached", detached), db("copy_defs", copyDefs));
         }
         ScriptQueue queue = scriptEntry.getResidingQueue();
-        List<ScriptEntry> entries = getBracedCommandsDirect(scriptEntry, scriptEntry);
-        if (entries == null || entries.isEmpty()) {
-            Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
-            scriptEntry.setFinished(true);
-            return;
+        List<ScriptEntry> entries = detached ? null : scriptEntry.inlinedBody;
+        if (entries == null) {
+            entries = getBracedCommandsDirect(scriptEntry, scriptEntry);
+            if (entries == null || entries.isEmpty()) {
+                Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
+                scriptEntry.setFinished(true);
+                return;
+            }
+            ScriptEntry markerEntry = new ScriptEntry("ASYNC", new String[]{"\0CALLBACK"}, scriptEntry.getScriptContainer());
+            markerEntry.copyFrom(scriptEntry);
+            markerEntry.setOwner(scriptEntry);
+            entries.add(markerEntry);
+            for (ScriptEntry entry : entries) {
+                entry.setInstant(true);
+            }
+            if (!detached) {
+                scriptEntry.inlinedBody = entries;
+            }
+        }
+        else {
+            ScriptEntry.resetBodyForReuse(entries);
         }
         AsyncData data = new AsyncData();
         data.startNanos = System.nanoTime();
         scriptEntry.setData(data);
-        ScriptEntry markerEntry = new ScriptEntry("ASYNC", new String[]{"\0CALLBACK"}, scriptEntry.getScriptContainer());
-        markerEntry.copyFrom(scriptEntry);
-        markerEntry.setOwner(scriptEntry);
-        entries.add(markerEntry);
+        entries.get(entries.size() - 1).setData(data);
         if ((queue.isAsync() && !detached) || !CoreConfiguration.allowAsyncScripts || isKnownCheap(scriptEntry, detached)) {
             // Run the block right here, in this queue, on this thread. Identical in every observable way to the worker path -
             // same definitions, same ordering, same 'stop' behaviour - it just skips the thread hand-off and the tick of waiting it costs.

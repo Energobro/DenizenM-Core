@@ -180,7 +180,13 @@ public class IfCommand extends BracedCommand {
         ParsedIf parsed = parsedFor(scriptEntry, "if");
         boolean has_brace = parsed.hasBrace;
         List<BracedData> braces = null;
+        BracedData soleBody = null;
         if (scriptEntry.getInsideList() != null) {
+            ScriptEntry upcoming = scriptEntry.getResidingQueue().script_entries.size() > 0 ? scriptEntry.getResidingQueue().script_entries.get(0) : null;
+            if (upcoming == null || !(upcoming.getCommand() instanceof ElseCommand)) {
+                soleBody = getBracedCommands(scriptEntry, false).get(0);
+            }
+            else {
             // 'false' - the body is NOT cloned here. parseArgs runs on every execution, and cloning every line of every branch before the
             // condition has even been read costs a ScriptEntry clone per line whether that branch runs or not. execute clones the one branch
             // it picks, through BracedCommand.duplicateBracedSection.
@@ -213,6 +219,7 @@ public class IfCommand extends BracedCommand {
                 allData.add(elseRef);
             }
             braces = allData;
+            }
         }
         else if (has_brace) {
             braces = getBracedCommands(scriptEntry, false);
@@ -221,7 +228,7 @@ public class IfCommand extends BracedCommand {
         List<String> subcommand = !has_brace && (parsed.hasSubcommand || parsed.hasElsecommand) ? parsed.subcommand : null;
         List<String> comparisons = parsed.comparisons;
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, "IF", db("use_braces", braces != null));
+            Debug.report(scriptEntry, "IF", db("use_braces", braces != null || soleBody != null));
         }
         if (CoreConfiguration.debugVerbose) {
             Debug.log("comparisons=" + comparisons + ", sc:" + subcommand + ", ec:" + elsecommand);
@@ -235,6 +242,34 @@ public class IfCommand extends BracedCommand {
             executeCommandList(elsecommand, scriptEntry);
             return;
         }
+        if (soleBody != null) {
+            if (!first_set) {
+                Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
+                return;
+            }
+            if (CoreConfiguration.debugVerbose) {
+                Debug.log("Running the first set");
+            }
+            Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
+            List<ScriptEntry> soleList = scriptEntry.inlinedBody;
+            if (soleList == null) {
+                soleList = duplicateBracedSection(soleBody, scriptEntry);
+                if (soleList == null) {
+                    Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
+                    return;
+                }
+                for (ScriptEntry entry : soleList) {
+                    entry.setInstant(true);
+                }
+                scriptEntry.inlinedBody = soleList;
+            }
+            else {
+                ScriptEntry.resetBodyForReuse(soleList);
+            }
+            scriptEntry.setInstant(true);
+            scriptEntry.getResidingQueue().injectEntriesAtStart(soleList);
+            return;
+        }
         if (braces != null) {
             if (braces.isEmpty()) {
                 Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
@@ -245,15 +280,12 @@ public class IfCommand extends BracedCommand {
                     Debug.log("Running the first set");
                 }
                 Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
-                List<ScriptEntry> bracedCommandsList = duplicateBracedSection(braces.get(0), braces.get(0).entry);
+                List<ScriptEntry> bracedCommandsList = branchBodyFor(scriptEntry, 0, braces.get(0));
                 if (bracedCommandsList == null) {
                     Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
                     return;
                 }
                 scriptEntry.setInstant(true);
-                for (ScriptEntry entry : bracedCommandsList) {
-                    entry.setInstant(true);
-                }
                 scriptEntry.getResidingQueue().injectEntriesAtStart(bracedCommandsList);
                 return;
             }
@@ -293,21 +325,50 @@ public class IfCommand extends BracedCommand {
                     else {
                         Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, running ELSE block.");
                     }
-                    List<ScriptEntry> bracedCommandsList = duplicateBracedSection(braceSet, braceSet.entry);
+                    List<ScriptEntry> bracedCommandsList = branchBodyFor(scriptEntry, z, braceSet);
                     if (bracedCommandsList == null) {
                         Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
                         return;
                     }
                     scriptEntry.setInstant(true);
-                    for (ScriptEntry entry : bracedCommandsList) {
-                        entry.setInstant(true);
-                    }
                     scriptEntry.getResidingQueue().injectEntriesAtStart(bracedCommandsList);
                     return;
                 }
             }
         }
         Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
+    }
+
+    /**
+     * The cloned body of one branch of this if line, built once per entry and reused.
+     * <p>
+     * Indexed the same way the braced sections are: 0 is the if's own body, 1 and up are the else / else-if ones. Which branch runs varies
+     * per execution, so a single cached list cannot serve - but each branch's body is the same lines every time the entry runs, and the
+     * previous run's copy is always consumed from the queue before the entry can run again.
+     */
+    public static List<ScriptEntry> branchBodyFor(ScriptEntry scriptEntry, int index, BracedData braceSet) {
+        List<List<ScriptEntry>> branches = scriptEntry.inlinedBranches;
+        if (branches == null) {
+            branches = new ArrayList<>(2);
+            scriptEntry.inlinedBranches = branches;
+        }
+        while (branches.size() <= index) {
+            branches.add(null);
+        }
+        List<ScriptEntry> body = branches.get(index);
+        if (body != null) {
+            ScriptEntry.resetBodyForReuse(body);
+            return body;
+        }
+        body = duplicateBracedSection(braceSet, braceSet.entry);
+        if (body == null) {
+            return null;
+        }
+        for (ScriptEntry entry : body) {
+            entry.setInstant(true);
+        }
+        branches.set(index, body);
+        return body;
     }
 
     public static void executeCommandList(List<String> subcommand, ScriptEntry scriptEntry) {

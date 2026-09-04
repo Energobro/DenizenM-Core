@@ -44,7 +44,7 @@ public class CommandExecutor {
         }
         Consumer<String> altDebug = scriptEntry.getResidingQueue().debugOutput;
         scriptEntry.getResidingQueue().debugOutput = null;
-        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "<LP>Queue '" + scriptEntry.getResidingQueue().debugId
+        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "<LP>Queue '" + scriptEntry.getResidingQueue().getDebugId()
                 + "<LP>' Executing: <G>(line " + scriptEntry.internal.lineNumber + ")<W> " + scriptEntry.internal.originalLine);
         scriptEntry.getResidingQueue().debugOutput = altDebug;
     }

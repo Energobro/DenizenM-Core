@@ -115,26 +115,10 @@ public class ForeachCommand extends BracedCommand {
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, "FOREACH", db("instruction", "stop"));
             }
-            boolean hasnext = false;
-            for (int i = 0; i < queue.getQueueSize(); i++) {
-                ScriptEntry entry = queue.getEntry(i);
-                List<String> args = entry.getOriginalArguments();
-                if (entry.getCommandName().equals("FOREACH") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                    hasnext = true;
-                    break;
-                }
-            }
-            if (hasnext) {
-                while (queue.getQueueSize() > 0) {
-                    ScriptEntry entry = queue.getEntry(0);
-                    List<String> args = entry.getOriginalArguments();
-                    if (entry.getCommandName().equals("FOREACH") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                        ((ForeachData) entry.getOwner().getData()).reapplyAtEnd(queue);
-                        queue.removeFirst();
-                        break;
-                    }
-                    queue.removeFirst();
-                }
+            ScriptQueue.LoopFrame frame = queue.findLoopFrame("FOREACH");
+            if (frame != null) {
+                ((ForeachData) frame.owner.getData()).reapplyAtEnd(queue);
+                queue.endLoopFrame(frame);
             }
             else {
                 Debug.echoError(scriptEntry, "Cannot stop foreach: not in one!");
@@ -145,24 +129,9 @@ public class ForeachCommand extends BracedCommand {
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, "FOREACH", db("instruction", "next"));
             }
-            boolean hasnext = false;
-            for (int i = 0; i < queue.getQueueSize(); i++) {
-                ScriptEntry entry = queue.getEntry(i);
-                List<String> args = entry.getOriginalArguments();
-                if (entry.getCommandName().equals("FOREACH") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                    hasnext = true;
-                    break;
-                }
-            }
-            if (hasnext) {
-                while (queue.getQueueSize() > 0) {
-                    ScriptEntry entry = queue.getEntry(0);
-                    List<String> args = entry.getOriginalArguments();
-                    if (entry.getCommandName().equals("FOREACH") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                        break;
-                    }
-                    queue.removeFirst();
-                }
+            ScriptQueue.LoopFrame frame = queue.findLoopFrame("FOREACH");
+            if (frame != null) {
+                queue.skipToLoopFrameEnd(frame);
             }
             else {
                 Debug.echoError(scriptEntry, "Cannot 'foreach next': not in one!");
@@ -170,39 +139,7 @@ public class ForeachCommand extends BracedCommand {
             return;
         }
         else if (callback) {
-            if (scriptEntry.getOwner() != null && (scriptEntry.getOwner().getCommandName().equals("FOREACH") ||
-                    scriptEntry.getOwner().getBracedSet() == null || scriptEntry.getOwner().getBracedSet().isEmpty() ||
-                    scriptEntry.getBracedSet().get(0).value.get(scriptEntry.getBracedSet().get(0).value.size() - 1) != scriptEntry)) {
-                ForeachData data = (ForeachData) scriptEntry.getOwner().getData();
-                data.index++;
-                if (data.index <= data.list.size()) {
-                    if (scriptEntry.dbCallShouldDebug()) {
-                        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "Foreach loop " + data.index);
-                    }
-                    queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
-                    if (data.keys != null) {
-                        queue.addDefinition(data.keyHolder, new ElementTag(data.keys.get(data.index - 1)));
-                    }
-                    queue.addDefinition(data.valueHolder, data.list.getObject(data.index - 1));
-                    List<ScriptEntry> bracedCommands = BracedCommand.getBracedCommandsDirect(scriptEntry.getOwner(), scriptEntry);
-                    ScriptEntry callbackEntry = scriptEntry.clone();
-                    callbackEntry.setOwner(scriptEntry.getOwner());
-                    bracedCommands.add(callbackEntry);
-                    for (ScriptEntry cmd : bracedCommands) {
-                        cmd.setInstant(true);
-                    }
-                    queue.injectEntriesAtStart(bracedCommands);
-                }
-                else {
-                    data.reapplyAtEnd(queue);
-                    if (scriptEntry.dbCallShouldDebug()) {
-                        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "Foreach loop complete");
-                    }
-                }
-            }
-            else {
-                Debug.echoError(scriptEntry, "Foreach CALLBACK invalid: not a real callback!");
-            }
+            Debug.echoError(scriptEntry, "Foreach CALLBACK invalid: loops no longer run through callback entries.");
         }
         else {
             if (object == null) {
@@ -250,11 +187,17 @@ public class ForeachCommand extends BracedCommand {
             }
             datum.index = 1;
             scriptEntry.setData(datum);
-            ScriptEntry callbackEntry = getCallback(scriptEntry);
-            List<ScriptEntry> bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
-            if (bracedCommandsList == null || bracedCommandsList.isEmpty()) {
-                Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
-                return;
+            List<ScriptEntry> bracedCommandsList = scriptEntry.inlinedBody;
+            boolean freshBody = bracedCommandsList == null;
+            if (freshBody) {
+                bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
+                if (bracedCommandsList == null || bracedCommandsList.isEmpty()) {
+                    Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
+                    return;
+                }
+            }
+            else {
+                ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
             if (datum.keys != null) {
                 datum.keyName = keyName;
@@ -268,22 +211,35 @@ public class ForeachCommand extends BracedCommand {
             datum.originalIndexValue = queue.getDefinitionObject("loop_index");
             queue.addDefinition(datum.valueName, datum.list.getObject(0));
             queue.addDefinition("loop_index", new ElementTag("1"));
-            callbackEntry.copyFrom(scriptEntry);
-            callbackEntry.setOwner(scriptEntry);
-            bracedCommandsList.add(callbackEntry);
-            for (ScriptEntry cmd : bracedCommandsList) {
-                cmd.setInstant(true);
+            if (freshBody) {
+                for (ScriptEntry cmd : bracedCommandsList) {
+                    cmd.setInstant(true);
+                }
+                scriptEntry.inlinedBody = bracedCommandsList;
             }
             scriptEntry.setInstant(true);
-            queue.injectEntriesAtStart(bracedCommandsList);
+            queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
         }
     }
 
-    public static ScriptEntry getCallback(ScriptEntry forEntry) {
-        if (forEntry.internal.specialProcessedData == null) {
-            forEntry.internal.specialProcessedData = new ScriptEntry("FOREACH", new String[]{"\0CALLBACK"},
-                    forEntry.getScript() != null ? forEntry.getScript().getContainer() : null);
+    public static final ScriptQueue.LoopIteration ITERATION = (queue, owner) -> {
+        ForeachData data = (ForeachData) owner.getData();
+        data.index++;
+        if (data.index > data.list.size()) {
+            data.reapplyAtEnd(queue);
+            if (owner.dbCallShouldDebug()) {
+                Debug.echoDebug(owner, Debug.DebugElement.Header, "Foreach loop complete");
+            }
+            return false;
         }
-        return ((ScriptEntry) forEntry.internal.specialProcessedData).clone();
-    }
+        if (owner.dbCallShouldDebug()) {
+            Debug.echoDebug(owner, Debug.DebugElement.Header, "Foreach loop " + data.index);
+        }
+        queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
+        if (data.keys != null) {
+            queue.addDefinition(data.keyHolder, new ElementTag(data.keys.get(data.index - 1)));
+        }
+        queue.addDefinition(data.valueHolder, data.list.getObject(data.index - 1));
+        return true;
+    };
 }

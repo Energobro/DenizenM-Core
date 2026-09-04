@@ -417,6 +417,24 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
     public String saveName = null;
 
+    public List<ScriptEntry> inlinedBody = null;
+
+    public List<List<ScriptEntry>> inlinedBranches = null;
+
+    public void resetForReuse() {
+        if (objects != null) {
+            objects.clear();
+        }
+        data = null;
+        saveName = null;
+    }
+
+    public static void resetBodyForReuse(List<ScriptEntry> body) {
+        for (int i = 0; i < body.size(); i++) {
+            body.get(i).resetForReuse();
+        }
+    }
+
     public List<BracedCommand.BracedData> getBracedSet() {
         return internal.bracedSet;
     }
@@ -447,6 +465,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
     public ScriptEntry clone() {
         try {
             ScriptEntry se = (ScriptEntry) super.clone();
+            se.inlinedBody = null;
+            se.inlinedBranches = null;
             se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
             se.entryData = entryData.clone();
             se.entryData.scriptEntry = se;
@@ -468,6 +488,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
     public ScriptEntry cloneWithDataFrom(ScriptEntry copyFrom) {
         try {
             ScriptEntry se = (ScriptEntry) super.clone();
+            se.inlinedBody = null;
+            se.inlinedBranches = null;
             se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
             se.entryData = copyFrom.entryData.clone();
             se.setSendingQueue(copyFrom.getResidingQueue());

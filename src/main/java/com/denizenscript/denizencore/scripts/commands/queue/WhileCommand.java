@@ -64,8 +64,8 @@ public class WhileCommand extends BracedCommand {
     /**
      * The parts of a while line that are the same on every run: which form it is, its comparison arguments, and the compiled condition.
      * <p>
-     * parseArgs runs before every execution, and a while loop executes it once per iteration through its callback entry, so all of this
-     * was being rebuilt for every turn of every loop even though it is a pure function of the line as written.
+     * parseArgs runs before every execution, so all of this was being rebuilt for every turn of every loop, back when a turn was a
+     * callback entry going through the command dispatcher, even though it is a pure function of the line as written.
      */
     public static class ParsedWhile {
 
@@ -75,7 +75,35 @@ public class WhileCommand extends BracedCommand {
 
         /** Held here rather than through IfCommand.conditionFor: that stores a bare Condition in the same slot this holder occupies. */
         public IfCommand.Condition condition;
+
     }
+
+    public static final ScriptQueue.LoopIteration ITERATION = (queue, owner) -> {
+        WhileData data = (WhileData) owner.getData();
+        data.index++;
+        if (CoreUtilities.monotonicMillis() - data.LastChecked < 50) {
+            data.instaTicks++;
+            if (data.instaTicks > CoreConfiguration.whileMaxLoops && CoreConfiguration.whileMaxLoops != 0) {
+                return false;
+            }
+        }
+        else {
+            data.instaTicks = 0;
+        }
+        data.LastChecked = CoreUtilities.monotonicMillis();
+        if (!parsedFor(owner).condition.evaluate(owner)) {
+            data.reapplyAtEnd(queue);
+            if (owner.dbCallShouldDebug()) {
+                Debug.echoDebug(owner, Debug.DebugElement.Header, "While loop complete");
+            }
+            return false;
+        }
+        if (owner.dbCallShouldDebug()) {
+            Debug.echoDebug(owner, Debug.DebugElement.Header, "While loop " + data.index);
+        }
+        queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(String.valueOf(data.index)));
+        return true;
+    };
 
     public static ParsedWhile parsedFor(ScriptEntry entry) {
         if (entry.internal.specialProcessedData instanceof ParsedWhile) {
@@ -117,26 +145,10 @@ public class WhileCommand extends BracedCommand {
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, getName(), db("stop", true));
             }
-            boolean hasnext = false;
-            for (int i = 0; i < queue.getQueueSize(); i++) {
-                ScriptEntry entry = queue.getEntry(i);
-                List<String> args = entry.getOriginalArguments();
-                if (entry.getCommandName().equals("WHILE") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                    hasnext = true;
-                    break;
-                }
-            }
-            if (hasnext) {
-                while (queue.getQueueSize() > 0) {
-                    ScriptEntry entry = queue.getEntry(0);
-                    List<String> args = entry.getOriginalArguments();
-                    if (entry.getCommandName().equals("WHILE") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                        ((WhileData) entry.getOwner().getData()).reapplyAtEnd(queue);
-                        queue.removeFirst();
-                        break;
-                    }
-                    queue.removeFirst();
-                }
+            ScriptQueue.LoopFrame frame = queue.findLoopFrame("WHILE");
+            if (frame != null) {
+                ((WhileData) frame.owner.getData()).reapplyAtEnd(queue);
+                queue.endLoopFrame(frame);
             }
             else {
                 Debug.echoError(scriptEntry, "Cannot stop while: not in one!");
@@ -147,24 +159,9 @@ public class WhileCommand extends BracedCommand {
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, getName(), db("next", true));
             }
-            boolean hasnext = false;
-            for (int i = 0; i < queue.getQueueSize(); i++) {
-                ScriptEntry entry = queue.getEntry(i);
-                List<String> args = entry.getOriginalArguments();
-                if (entry.getCommandName().equals("WHILE") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                    hasnext = true;
-                    break;
-                }
-            }
-            if (hasnext) {
-                while (queue.getQueueSize() > 0) {
-                    ScriptEntry entry = queue.getEntry(0);
-                    List<String> args = entry.getOriginalArguments();
-                    if (entry.getCommandName().equals("WHILE") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                        break;
-                    }
-                    queue.removeFirst();
-                }
+            ScriptQueue.LoopFrame frame = queue.findLoopFrame("WHILE");
+            if (frame != null) {
+                queue.skipToLoopFrameEnd(frame);
             }
             else {
                 Debug.echoError(scriptEntry, "Cannot 'while next': not in one!");
@@ -172,46 +169,7 @@ public class WhileCommand extends BracedCommand {
             return;
         }
         else if (parsed.callback) {
-            if (scriptEntry.getOwner() != null && (scriptEntry.getOwner().getCommandName().equals("WHILE") ||
-                    scriptEntry.getOwner().getBracedSet() == null || scriptEntry.getOwner().getBracedSet().isEmpty() ||
-                    scriptEntry.getBracedSet().get(0).value.get(scriptEntry.getBracedSet().get(0).value.size() - 1) != scriptEntry)) {
-                WhileData data = (WhileData) scriptEntry.getOwner().getData();
-                data.index++;
-                if (CoreUtilities.monotonicMillis() - data.LastChecked < 50) {
-                    data.instaTicks++;
-                    if (data.instaTicks > CoreConfiguration.whileMaxLoops && CoreConfiguration.whileMaxLoops != 0) {
-                        return;
-                    }
-                }
-                else {
-                    data.instaTicks = 0;
-                }
-                data.LastChecked = CoreUtilities.monotonicMillis();
-                boolean run = parsedFor(scriptEntry.getOwner()).condition.evaluate(scriptEntry);
-                if (run) {
-                    if (scriptEntry.dbCallShouldDebug()) {
-                        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "While loop " + data.index);
-                    }
-                    queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(String.valueOf(data.index)));
-                    List<ScriptEntry> bracedCommands = BracedCommand.getBracedCommandsDirect(scriptEntry.getOwner(), scriptEntry);
-                    ScriptEntry callbackEntry = scriptEntry.cloneWithDataFrom(scriptEntry);
-                    callbackEntry.setOwner(scriptEntry.getOwner());
-                    bracedCommands.add(callbackEntry);
-                    for (int i = 0; i < bracedCommands.size(); i++) {
-                        bracedCommands.get(i).setInstant(true);
-                    }
-                    queue.injectEntriesAtStart(bracedCommands);
-                }
-                else {
-                    data.reapplyAtEnd(queue);
-                    if (scriptEntry.dbCallShouldDebug()) {
-                        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "While loop complete");
-                    }
-                }
-            }
-            else {
-                Debug.echoError(scriptEntry, "While CALLBACK invalid: not a real callback!");
-            }
+            Debug.echoError(scriptEntry, "While CALLBACK invalid: loops no longer run through callback entries.");
         }
         else {
             List<String> comparisons = parsed.comparisons;
@@ -228,23 +186,25 @@ public class WhileCommand extends BracedCommand {
             datum.LastChecked = CoreUtilities.monotonicMillis();
             datum.instaTicks = 1;
             scriptEntry.setData(datum);
-            ScriptEntry callbackEntry = new ScriptEntry("WHILE", new String[] {"\0CALLBACK"},
-                    (scriptEntry.getScript() != null ? scriptEntry.getScript().getContainer() : null));
-            callbackEntry.copyFrom(scriptEntry);
-            callbackEntry.setOwner(scriptEntry);
-            List<ScriptEntry> bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
-            if (bracedCommandsList == null || bracedCommandsList.isEmpty()) {
-                Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
-                return;
+            List<ScriptEntry> bracedCommandsList = scriptEntry.inlinedBody;
+            if (bracedCommandsList == null) {
+                bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
+                if (bracedCommandsList == null || bracedCommandsList.isEmpty()) {
+                    Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
+                    return;
+                }
+                for (int i = 0; i < bracedCommandsList.size(); i++) {
+                    bracedCommandsList.get(i).setInstant(true);
+                }
+                scriptEntry.inlinedBody = bracedCommandsList;
+            }
+            else {
+                ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
             datum.originalIndexValue = queue.getDefinitionObject("loop_index");
             queue.addDefinition("loop_index", "1");
-            bracedCommandsList.add(callbackEntry);
-            for (int i = 0; i < bracedCommandsList.size(); i++) {
-                bracedCommandsList.get(i).setInstant(true);
-            }
             scriptEntry.setInstant(true);
-            queue.injectEntriesAtStart(bracedCommandsList);
+            queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
         }
     }
 }

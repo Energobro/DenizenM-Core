@@ -129,7 +129,7 @@ public class AsyncQueue extends TimedQueue {
             // debugId carries its own colour codes, so the surrounding colour has to be restored after it, or the last word of the generated
             // queue name paints the rest of the line. Which code to restore to depends on where the text lands: a debug body is <O> (see
             // ScriptQueue.queueDebug), and an error body is <W> (DebugInternals.ERROR_HEADER_END). <LR> belongs only inside an error header.
-            Debug.echoDebug(this, "Async scripts are disabled in config - running queue '" + debugId + "<O>' on the main thread instead.");
+            Debug.echoDebug(this, "Async scripts are disabled in config - running queue '" + getDebugId() + "<O>' on the main thread instead.");
             foldedToMainThread = true;
             super.onStart();
             return;
@@ -141,7 +141,7 @@ public class AsyncQueue extends TimedQueue {
             // Two threads starting queues at once can each overshoot by one. Left alone: the case worth stopping is one script's loop, on one thread.
             if (!warnedOnLimit) {
                 warnedOnLimit = true;
-                Debug.echoError(limit + " async script queues are already running, which is the configured limit, so queue '" + debugId
+                Debug.echoError(limit + " async script queues are already running, which is the configured limit, so queue '" + getDebugId()
                         + "<W>' is running on the main thread instead. Something is starting async queues in a loop - consider one queue that processes a list.");
             }
             foldedToMainThread = true;
@@ -162,7 +162,7 @@ public class AsyncQueue extends TimedQueue {
             // pendingTasks with no worker to drain it, and the set entry would hold a slot under the limit forever.
             workerDispatched = false;
             runningQueues.remove(this);
-            Debug.echoError("Could not start a thread for async queue '" + debugId + "<W>' - running it on the main thread instead:");
+            Debug.echoError("Could not start a thread for async queue '" + getDebugId() + "<W>' - running it on the main thread instead:");
             Debug.echoError(ex);
             foldedToMainThread = true;
             super.onStart();

@@ -6,6 +6,7 @@ import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.CommandExecutor;
+import com.denizenscript.denizencore.tags.TagContext;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.*;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
@@ -73,7 +74,26 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     public String id;
 
-    public String debugId;
+    protected String debugId;
+
+    protected String debugIdPrefix;
+
+    protected long debugIdNumeric;
+
+    protected String[] debugIdWords;
+
+    public String getDebugId() {
+        if (debugId == null) {
+            StringBuilder wordsColor = new StringBuilder();
+            if (debugIdWords != null) {
+                for (String word : debugIdWords) {
+                    wordsColor.append(DenizenCore.implementation.getRandomColor()).append(word);
+                }
+            }
+            debugId = (CoreConfiguration.queueIdPrefix ? "<LG>" + debugIdPrefix + "_" : "") + (CoreConfiguration.queueIdNumeric ? "<GR>" + debugIdNumeric + (CoreConfiguration.queueIdWords ? "<LG>_" : "") : "") + (CoreConfiguration.queueIdWords ? wordsColor.toString() : "");
+        }
+        return debugId;
+    }
 
     /**
      * Whether this queue is locked to procedural commands only.
@@ -86,6 +106,109 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     public Consumer<String> debugOutput = null;
 
     public final ListQueue script_entries = new ListQueue(4);
+
+    /**
+     * Decides whether a loop runs its body once more, and does the per-iteration work (counter, definitions, debug header) when it does.
+     * Returning false ends the loop, and the implementation is responsible for restoring whatever it saved before the first iteration.
+     */
+    public interface LoopIteration {
+        boolean next(ScriptQueue queue, ScriptEntry owner);
+    }
+
+    /**
+     * A loop in progress: the body to run, and the point in the queue at which the body is finished.
+     * <p>
+     * The body is not held as a separate list of pending entries - it is injected into the queue like any other entries, and the frame
+     * only records how long the queue was underneath it ({@link #tailSize}). Anything the body injects while it runs (an if block, an
+     * inject, a nested loop) sits above that mark and is consumed before it, so the mark stays valid without being touched.
+     */
+    public static class LoopFrame {
+        public ScriptEntry owner;
+        public List<ScriptEntry> body;
+        public LoopIteration handler;
+        public int tailSize;
+    }
+
+    public ArrayList<LoopFrame> loopFrames = null;
+
+    public final void pushLoopFrame(ScriptEntry owner, List<ScriptEntry> body, LoopIteration handler) {
+        if (loopFrames == null) {
+            loopFrames = new ArrayList<>(2);
+        }
+        LoopFrame frame = new LoopFrame();
+        frame.owner = owner;
+        frame.body = body;
+        frame.handler = handler;
+        frame.tailSize = script_entries.size();
+        loopFrames.add(frame);
+        injectEntriesAtStart(body);
+    }
+
+    public final LoopFrame findLoopFrame(String commandName) {
+        if (loopFrames == null) {
+            return null;
+        }
+        for (int i = loopFrames.size() - 1; i >= 0; i--) {
+            if (loopFrames.get(i).owner.getCommandName().equals(commandName)) {
+                return loopFrames.get(i);
+            }
+        }
+        return null;
+    }
+
+    /** Drops everything the queue still holds inside the given loop's body, including any loops nested in it, leaving the loop itself ready to decide on another iteration. */
+    public final void skipToLoopFrameEnd(LoopFrame frame) {
+        while (loopFrames.get(loopFrames.size() - 1) != frame) {
+            loopFrames.remove(loopFrames.size() - 1);
+        }
+        while (script_entries.size() > frame.tailSize) {
+            script_entries.removeFirst();
+        }
+    }
+
+    public final void endLoopFrame(LoopFrame frame) {
+        skipToLoopFrameEnd(frame);
+        loopFrames.remove(loopFrames.size() - 1);
+    }
+
+    /** True if the queue has anything left to do - pending entries, or a loop that may still want another iteration. */
+    public final boolean hasMoreWork() {
+        return !script_entries.isEmpty() || (loopFrames != null && !loopFrames.isEmpty());
+    }
+
+    private boolean runLoopIteration(LoopFrame frame) {
+        if (frame.body.isEmpty()) {
+            // Cannot happen from any loop command, all of which refuse an empty body - but an empty body would spin here forever, so it is not left to trust.
+            return false;
+        }
+        if (frame.owner.getResidingQueue() != this) {
+            // The loop entry itself is long since executed and so was never moved by whatever replaced its queue (a 'wait' converting to
+            // a timed queue, say). Its context still points at the old queue, and a 'while' condition reads its definitions through exactly that.
+            frame.owner.setSendingQueue(this);
+            frame.owner.updateContext();
+        }
+        ScriptQueue priorQueue = CommandExecutor.getCurrentQueue();
+        TagContext priorContext = Debug.getCurrentContext();
+        try {
+            CommandExecutor.setCurrentQueue(this);
+            Debug.setCurrentContext(frame.owner.getContext());
+            if (!frame.handler.next(this, frame.owner)) {
+                return false;
+            }
+            ScriptEntry.resetBodyForReuse(frame.body);
+            injectEntriesAtStart(frame.body);
+            return true;
+        }
+        catch (Throwable ex) {
+            Debug.echoError(frame.owner, "Woah! An exception has been called while looping!");
+            Debug.echoError(frame.owner, ex);
+            return false;
+        }
+        finally {
+            CommandExecutor.setCurrentQueue(priorQueue);
+            Debug.setCurrentContext(priorContext);
+        }
+    }
 
     private ScriptEntry lastEntryExecuted = null;
 
@@ -335,6 +458,9 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     public final void clear() {
         script_entries.clear();
+        if (loopFrames != null) {
+            loopFrames.clear();
+        }
     }
 
     public void delayUntil(long delayTime) {
@@ -350,23 +476,22 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         // DUUIDs v2.5
         int size = QueueWordList.FinalWordList.size();
         Random random = CoreUtilities.getRandom();
-        String wordsRaw = "", wordsColor = "";
+        String wordsRaw = "";
+        debugIdWords = null;
         if (CoreConfiguration.queueIdWords) {
-            String wordOne = QueueWordList.FinalWordList.get(random.nextInt(size));
-            String wordTwo = QueueWordList.FinalWordList.get(random.nextInt(size));
-            String colorOne = DenizenCore.implementation.getRandomColor();
-            String colorTwo = DenizenCore.implementation.getRandomColor();
-            wordsRaw = wordOne + wordTwo;
-            wordsColor = colorOne + wordOne + colorTwo + wordTwo;
-            for (int i = 0; i < depth; i++) {
-                String wordThree = QueueWordList.FinalWordList.get(random.nextInt(size));
-                String colorThree = DenizenCore.implementation.getRandomColor();
-                wordsRaw += wordThree;
-                wordsColor += colorThree + wordThree;
+            String[] words = new String[2 + depth];
+            StringBuilder rawBuilder = new StringBuilder();
+            for (int i = 0; i < words.length; i++) {
+                words[i] = QueueWordList.FinalWordList.get(random.nextInt(size));
+                rawBuilder.append(words[i]);
             }
+            wordsRaw = rawBuilder.toString();
+            debugIdWords = words;
         }
         id = (CoreConfiguration.queueIdPrefix ? prefix + "_" : "") + (CoreConfiguration.queueIdNumeric ? numericId + (CoreConfiguration.queueIdWords ? "_" : "") : "") + (CoreConfiguration.queueIdWords ? wordsRaw : "");
-        debugId = (CoreConfiguration.queueIdPrefix ? "<LG>" + prefix + "_" : "") + (CoreConfiguration.queueIdNumeric ? "<GR>" + numericId + (CoreConfiguration.queueIdWords ? "<LG>_" : "") : "") + (CoreConfiguration.queueIdWords ? wordsColor : "");
+        debugIdPrefix = prefix;
+        debugIdNumeric = numericId;
+        debugId = null;
         if (!CoreConfiguration.queueIdNumeric && queueExists(id)) {
             if (!CoreConfiguration.queueIdWords) { // Prevent infinite loop from invalid config
                 Debug.echoError("WARNING: Configuration invalid! Trying to generate queue IDs with neither numbers nor words! Resetting to both enabled.");
@@ -392,6 +517,9 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         stopSilent();
         newQueue.id = id;
         newQueue.debugId = debugId;
+        newQueue.debugIdPrefix = debugIdPrefix;
+        newQueue.debugIdNumeric = debugIdNumeric;
+        newQueue.debugIdWords = debugIdWords;
         newQueue.debugOutput = this.debugOutput;
         for (ScriptEntry entry : getEntries()) {
             entry = entry.clone();
@@ -400,6 +528,9 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             entry.setSendingQueue(newQueue);
             entry.updateContext();
             newQueue.script_entries.add(entry);
+        }
+        if (loopFrames != null && !loopFrames.isEmpty()) {
+            newQueue.loopFrames = new ArrayList<>(loopFrames);
         }
         newQueue.determinations = determinations;
         newQueue.definitions = definitions.duplicate();
@@ -413,7 +544,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         newQueue.script = script;
         newQueue.holdingOn = holdingOn;
         newQueue.callBack(r);
-        if (newQueue.script_entries.isEmpty() && newQueue.holdingOn == null) {
+        if (!newQueue.hasMoreWork() && newQueue.holdingOn == null) {
             newQueue.stop();
         }
         else {
@@ -429,7 +560,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     public final void queueDebug(String message) {
-        Debug.echoDebug(this, "<O>" + message.replace("<QUEUE>", debugId + "<O>"));
+        Debug.echoDebug(this, "<O>" + message.replace("<QUEUE>", getDebugId() + "<O>"));
     }
 
     public final void start() {
@@ -440,7 +571,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (is_started) {
             return;
         }
-        if (script_entries.isEmpty() && holdingOn == null) {
+        if (!hasMoreWork() && holdingOn == null) {
             return;
         }
         // Note: a queue started from a non-main thread deliberately runs on that thread rather than being deferred to the main thread.
@@ -548,6 +679,17 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     public final ScriptEntry getNext() {
+        while (loopFrames != null && !loopFrames.isEmpty()) {
+            LoopFrame frame = loopFrames.get(loopFrames.size() - 1);
+            int size = script_entries.size();
+            if (size > frame.tailSize) {
+                break;
+            }
+            // Below the mark means something cut the queue back past this loop, eg a goto out of it - the loop is over either way, but it doesn't get another turn.
+            if (size < frame.tailSize || !runLoopIteration(frame)) {
+                loopFrames.remove(loopFrames.size() - 1);
+            }
+        }
         if (!script_entries.isEmpty()) {
             return script_entries.removeFirst();
         }

@@ -104,7 +104,7 @@ public class QueueTag implements ObjectTag, Adjustable, FlaggableObject {
 
     @Override
     public String debuggable() {
-        return "<LG>q@<Y>" + queue.debugId;
+        return "<LG>q@<Y>" + queue.getDebugId();
     }
 
     @Override

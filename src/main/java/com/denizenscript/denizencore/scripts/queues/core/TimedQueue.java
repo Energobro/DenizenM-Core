@@ -106,7 +106,7 @@ public class TimedQueue extends ScriptQueue {
     @Override
     public void onStart() {
         revolve();
-        if (script_entries.isEmpty() && holdingOn == null) {
+        if (!hasMoreWork() && holdingOn == null) {
             return;
         }
         if (DenizenCore.isMainThread()) {
@@ -134,7 +134,7 @@ public class TimedQueue extends ScriptQueue {
     }
 
     public void revolve() {
-        if (script_entries.isEmpty() && holdingOn == null) {
+        if (!hasMoreWork() && holdingOn == null) {
             if (!waitWhenEmpty) {
                 stop();
             }
@@ -144,7 +144,7 @@ public class TimedQueue extends ScriptQueue {
             return;
         }
         ScriptEngine.revolve(this);
-        if (script_entries.isEmpty() && holdingOn == null && !waitWhenEmpty) {
+        if (!hasMoreWork() && holdingOn == null && !waitWhenEmpty) {
             stop();
         }
     }

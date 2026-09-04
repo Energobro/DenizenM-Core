@@ -100,26 +100,10 @@ public class RepeatCommand extends BracedCommand {
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, "repeat", db("instruction", "stop"));
             }
-            boolean hasnext = false;
-            for (int i = 0; i < queue.getQueueSize(); i++) {
-                ScriptEntry entry = queue.getEntry(i);
-                List<String> args = entry.getOriginalArguments();
-                if (entry.getCommandName().equals("REPEAT") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                    hasnext = true;
-                    break;
-                }
-            }
-            if (hasnext) {
-                while (queue.getQueueSize() > 0) {
-                    ScriptEntry entry = queue.getEntry(0);
-                    List<String> args = entry.getOriginalArguments();
-                    if (entry.getCommandName().equals("REPEAT") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                        ((RepeatData) entry.getOwner().getData()).reapplyAtEnd(queue);
-                        queue.removeFirst();
-                        break;
-                    }
-                    queue.removeFirst();
-                }
+            ScriptQueue.LoopFrame frame = queue.findLoopFrame("REPEAT");
+            if (frame != null) {
+                ((RepeatData) frame.owner.getData()).reapplyAtEnd(queue);
+                queue.endLoopFrame(frame);
             }
             else {
                 Debug.echoError("Cannot stop repeat: not in one!");
@@ -130,24 +114,9 @@ public class RepeatCommand extends BracedCommand {
             if (scriptEntry.dbCallShouldDebug()) {
                 Debug.report(scriptEntry, "repeat", db("instruction", "next"));
             }
-            boolean hasnext = false;
-            for (int i = 0; i < queue.getQueueSize(); i++) {
-                ScriptEntry entry = queue.getEntry(i);
-                List<String> args = entry.getOriginalArguments();
-                if (entry.getCommandName().equals("REPEAT") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                    hasnext = true;
-                    break;
-                }
-            }
-            if (hasnext) {
-                while (queue.getQueueSize() > 0) {
-                    ScriptEntry entry = queue.getEntry(0);
-                    List<String> args = entry.getOriginalArguments();
-                    if (entry.getCommandName().equals("REPEAT") && args.size() == 1 && args.get(0).equals("\0CALLBACK")) {
-                        break;
-                    }
-                    queue.removeFirst();
-                }
+            ScriptQueue.LoopFrame frame = queue.findLoopFrame("REPEAT");
+            if (frame != null) {
+                queue.skipToLoopFrameEnd(frame);
             }
             else {
                 Debug.echoError("Cannot 'repeat next': not in one!");
@@ -155,35 +124,7 @@ public class RepeatCommand extends BracedCommand {
             return;
         }
         else if (action == Action.CALLBACK) {
-            if (scriptEntry.getOwner() != null && (scriptEntry.getOwner().getCommandName().equals("REPEAT") ||
-                    scriptEntry.getOwner().getBracedSet() == null || scriptEntry.getOwner().getBracedSet().isEmpty() ||
-                    scriptEntry.getBracedSet().get(0).value.get(scriptEntry.getBracedSet().get(0).value.size() - 1) != scriptEntry)) {
-                RepeatData data = (RepeatData) scriptEntry.getOwner().getData();
-                data.index++;
-                if (data.index <= data.target) {
-                    if (scriptEntry.dbCallShouldDebug()) {
-                        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "Repeat loop " + data.index);
-                    }
-                    queue.addDefinition(data.valueHolder, new ElementTag(String.valueOf(data.index)));
-                    List<ScriptEntry> bracedCommands = BracedCommand.getBracedCommandsDirect(scriptEntry.getOwner(), scriptEntry);
-                    ScriptEntry callbackEntry = scriptEntry.cloneWithDataFrom(scriptEntry);
-                    callbackEntry.setOwner(scriptEntry.getOwner());
-                    bracedCommands.add(callbackEntry);
-                    for (ScriptEntry cmd : bracedCommands) {
-                        cmd.setInstant(true);
-                    }
-                    queue.injectEntriesAtStart(bracedCommands);
-                }
-                else {
-                    data.reapplyAtEnd(queue);
-                    if (scriptEntry.dbCallShouldDebug()) {
-                        Debug.echoDebug(scriptEntry, Debug.DebugElement.Header, "Repeat loop complete");
-                    }
-                }
-            }
-            else {
-                Debug.echoError("Repeat CALLBACK invalid: not a real callback!");
-            }
+            Debug.echoError(scriptEntry, "Repeat CALLBACK invalid: loops no longer run through callback entries.");
         }
         else {
             if (quantity == -1) {
@@ -204,29 +145,42 @@ public class RepeatCommand extends BracedCommand {
             datum.valueName = asName;
             datum.valueHolder = new StringHolder(asName);
             scriptEntry.setData(datum);
-            ScriptEntry callbackEntry = getCallback(scriptEntry);
-            List<ScriptEntry> bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
-            if (bracedCommandsList == null || bracedCommandsList.isEmpty()) {
-                Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
-                return;
+            List<ScriptEntry> bracedCommandsList = scriptEntry.inlinedBody;
+            if (bracedCommandsList == null) {
+                bracedCommandsList = getBracedCommandsDirect(scriptEntry, scriptEntry);
+                if (bracedCommandsList == null || bracedCommandsList.isEmpty()) {
+                    Debug.echoError(scriptEntry, "Empty subsection - did you forget a ':'?");
+                    return;
+                }
+                for (ScriptEntry cmd : bracedCommandsList) {
+                    cmd.setInstant(true);
+                }
+                scriptEntry.inlinedBody = bracedCommandsList;
+            }
+            else {
+                ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
             queue.addDefinition(datum.valueHolder, new ElementTag(String.valueOf(datum.index)));
-            callbackEntry.copyFrom(scriptEntry);
-            callbackEntry.setOwner(scriptEntry);
-            bracedCommandsList.add(callbackEntry);
-            for (ScriptEntry cmd : bracedCommandsList) {
-                cmd.setInstant(true);
-            }
             scriptEntry.setInstant(true);
-            queue.injectEntriesAtStart(bracedCommandsList);
+            queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
         }
     }
 
-    public static ScriptEntry getCallback(ScriptEntry forEntry) {
-        if (forEntry.internal.specialProcessedData == null) {
-            forEntry.internal.specialProcessedData = new ScriptEntry("REPEAT", new String[] {"\0CALLBACK"}, forEntry.getScript() != null ? forEntry.getScript().getContainer() : null);
+    public static final ScriptQueue.LoopIteration ITERATION = (queue, owner) -> {
+        RepeatData data = (RepeatData) owner.getData();
+        data.index++;
+        if (data.index > data.target) {
+            data.reapplyAtEnd(queue);
+            if (owner.dbCallShouldDebug()) {
+                Debug.echoDebug(owner, Debug.DebugElement.Header, "Repeat loop complete");
+            }
+            return false;
         }
-        return ((ScriptEntry) forEntry.internal.specialProcessedData).clone();
-    }
+        if (owner.dbCallShouldDebug()) {
+            Debug.echoDebug(owner, Debug.DebugElement.Header, "Repeat loop " + data.index);
+        }
+        queue.addDefinition(data.valueHolder, new ElementTag(String.valueOf(data.index)));
+        return true;
+    };
 }
