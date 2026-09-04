@@ -126,6 +126,7 @@ public class ColorTag implements ObjectTag {
         else if (string.startsWith("#") && string.length() == 9 && HEX_MATCHER.isOnlyMatches(string.substring(1))) {
             ColorTag result = new ColorTag(fromRGB(Integer.parseInt(string.substring(1, 7), 16)));
             result.alpha = Integer.parseInt(string.substring(7, 9), 16);
+            result.alphaSpecified = true;
             return result;
         }
         else if (string.startsWith(COLOR_CHAR + "#") && string.length() == 8 && HEX_MATCHER.isOnlyMatches(string.substring(2))) {
@@ -161,7 +162,9 @@ public class ColorTag implements ObjectTag {
                 }
                 return null;
             }
-            return new ColorTag(red, green, blue, alpha);
+            ColorTag result = new ColorTag(red, green, blue, alpha);
+            result.alphaSpecified = split.size() == 4;
+            return result;
         }
         ColorTag col = colorsByName.get(string);
         if (col != null) {
@@ -194,9 +197,12 @@ public class ColorTag implements ObjectTag {
 
     public ColorTag(ColorTag color) {
         this(color.red, color.green, color.blue, color.alpha);
+        this.alphaSpecified = color.alphaSpecified;
     }
 
     public int red, green, blue, alpha;
+
+    public boolean alphaSpecified;
 
     public java.awt.Color getAWTColor() {
         return new java.awt.Color(red, green, blue, alpha);
@@ -216,14 +222,16 @@ public class ColorTag implements ObjectTag {
 
     @Override
     public String identify() {
-        String name = nameByColor.get(this);
-        if (name != null) {
-            return "co@" + name;
+        if (!alphaSpecified) {
+            String name = nameByColor.get(this);
+            if (name != null) {
+                return "co@" + name;
+            }
+            if (alpha == 255) {
+                return "co@" + red + "," + green + "," + blue;
+            }
         }
-        if (alpha != 255) {
-            return "co@" + red + "," + green + "," + blue + "," + alpha;
-        }
-        return "co@" + red + "," + green + "," + blue;
+        return "co@" + red + "," + green + "," + blue + "," + alpha;
     }
 
     @Override
@@ -443,7 +451,9 @@ public class ColorTag implements ObjectTag {
         // - narrate "<&color[<color[fuchsia].with_red[150]>]>This is fuchsia with a different red value!"
         // -->
         tagProcessor.registerStaticTag(ColorTag.class, "with_red", (attribute, object) -> {
-            return new ColorTag(attribute.getIntParam(), object.green, object.blue, object.alpha);
+            ColorTag result = new ColorTag(object);
+            result.red = attribute.getIntParam();
+            return result;
         });
 
         // <--[tag]
@@ -456,7 +466,9 @@ public class ColorTag implements ObjectTag {
         // - narrate "<&color[<color[fuchsia].with_green[150]>]>This is fuchsia with a different green value!"
         // -->
         tagProcessor.registerStaticTag(ColorTag.class, "with_green", (attribute, object) -> {
-            return new ColorTag(object.red, attribute.getIntParam(), object.blue, object.alpha);
+            ColorTag result = new ColorTag(object);
+            result.green = attribute.getIntParam();
+            return result;
         });
 
         // <--[tag]
@@ -469,7 +481,9 @@ public class ColorTag implements ObjectTag {
         // - narrate "<&color[<color[fuchsia].with_blue[150]>]>This is fuchsia with a different blue value!"
         // -->
         tagProcessor.registerStaticTag(ColorTag.class, "with_blue", (attribute, object) -> {
-            return new ColorTag(object.red, object.green, attribute.getIntParam(), object.alpha);
+            ColorTag result = new ColorTag(object);
+            result.blue = attribute.getIntParam();
+            return result;
         });
 
         // <--[tag]
@@ -482,7 +496,9 @@ public class ColorTag implements ObjectTag {
         // - narrate <color[fuchsia].with_alpha[150].rgba>
         // -->
         tagProcessor.registerStaticTag(ColorTag.class, "with_alpha", (attribute, object) -> {
-            return new ColorTag(object.red, object.green, object.blue, attribute.getIntParam());
+            ColorTag result = new ColorTag(object.red, object.green, object.blue, attribute.getIntParam());
+            result.alphaSpecified = true;
+            return result;
         });
 
         // <--[tag]
@@ -543,7 +559,14 @@ public class ColorTag implements ObjectTag {
         // - narrate <color[#ff69b8].name>
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "name", (attribute, object) -> {
-            return new ElementTag(object.identify().substring("co@".length()));
+            String name = nameByColor.get(object);
+            if (name != null) {
+                return new ElementTag(name);
+            }
+            if (object.alpha == 255) {
+                return new ElementTag(object.red + "," + object.green + "," + object.blue);
+            }
+            return new ElementTag(object.red + "," + object.green + "," + object.blue + "," + object.alpha);
         });
 
         // <--[tag]
