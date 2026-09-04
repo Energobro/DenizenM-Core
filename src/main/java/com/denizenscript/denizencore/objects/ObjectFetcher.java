@@ -448,8 +448,9 @@ public class ObjectFetcher {
         if (value == null) {
             return null;
         }
-        if (CoreUtilities.contains(value, '@')) {
-            String type = value.split("@", 2)[0];
+        int atIndex = value.indexOf('@');
+        if (atIndex != -1) {
+            String type = value.substring(0, atIndex);
             ObjectType<? extends ObjectTag> toFetch = objectsByPrefix.get(type);
             if (toFetch != null && (toFetch.canConvertStatic || !TagManager.isStaticParsing)) {
                 ObjectTag fetched = getObjectFrom(toFetch, value, context);
