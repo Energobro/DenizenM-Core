@@ -241,10 +241,51 @@ public class ElementTag implements ObjectTag {
         return bd;
     }
 
+    private BigDecimal getBDRaw(String text) {
+        BigDecimal bd = new BigDecimal(text);
+        if (bd.compareTo(max) >= 1) {
+            Debug.echoError("Unreasonably large number detected!");
+            return max;
+        }
+        return bd;
+    }
+
     public static AsciiMatcher percentageMatcher = new AsciiMatcher("%");
 
     public BigDecimal asBigDecimal() {
         return getBD(percentageMatcher.trimToNonMatches(element));
+    }
+
+    public BigDecimal asBigDecimalRaw() {
+        return getBDRaw(percentageMatcher.trimToNonMatches(element));
+    }
+
+    public static boolean isPlainLong(String text) {
+        int length = text.length();
+        if (length == 0 || length > 18) {
+            return false;
+        }
+        int start = text.charAt(0) == '-' || text.charAt(0) == '+' ? 1 : 0;
+        if (start == length) {
+            return false;
+        }
+        for (int i = start; i < length; i++) {
+            char ch = text.charAt(i);
+            if (ch < '0' || ch > '9') {
+                return false;
+            }
+        }
+        return true;
+    }
+
+    static boolean wouldFormatScientific(BigDecimal value) {
+        return value.scale() < 0 || value.precision() - 1 - value.scale() < -6;
+    }
+
+    static ElementTag decimalOf(long value) {
+        ElementTag result = new ElementTag(value);
+        result.prefix = "decimal";
+        return result;
     }
 
     public double asDouble() {
@@ -299,7 +340,7 @@ public class ElementTag implements ObjectTag {
             if (!ArgumentHelper.matchesDouble(element)) {
                 return false;
             }
-            if (!Double.valueOf(element).isNaN()) {
+            if (!Double.isNaN(Double.parseDouble(element))) {
                 return true;
             }
         }
@@ -313,7 +354,7 @@ public class ElementTag implements ObjectTag {
             if (!ArgumentHelper.matchesDouble(element)) {
                 return false;
             }
-            if (!Float.valueOf(element).isNaN()) {
+            if (!Float.isNaN(Float.parseFloat(element))) {
                 return true;
             }
         }
@@ -464,7 +505,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_more_than", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimal().compareTo(compareVal.asBigDecimal()) > 0);
+            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) > 0);
         });
 
         // <--[tag]
@@ -477,7 +518,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_less_than", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimal().compareTo(compareVal.asBigDecimal()) < 0);
+            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) < 0);
         });
 
         // <--[tag]
@@ -490,7 +531,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_more_than_or_equal_to", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimal().compareTo(compareVal.asBigDecimal()) >= 0);
+            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) >= 0);
         });
 
         // <--[tag]
@@ -503,7 +544,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_less_than_or_equal_to", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimal().compareTo(compareVal.asBigDecimal()) <= 0);
+            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) <= 0);
         });
 
         // <--[tag]
@@ -1797,8 +1838,19 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' is not a valid decimal number!");
                 return null;
             }
+            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+                try {
+                    return decimalOf(Math.addExact(Long.parseLong(object.element), Long.parseLong(second.element)));
+                }
+                catch (ArithmeticException e) {
+                }
+            }
             try {
-                return new ElementTag(object.asBigDecimal().add(second.asBigDecimal()));
+                BigDecimal result = object.asBigDecimalRaw().add(second.asBigDecimalRaw());
+                if (wouldFormatScientific(result)) {
+                    result = object.asBigDecimal().add(second.asBigDecimal());
+                }
+                return new ElementTag(result);
             }
             catch (Throwable e) {
                 return new ElementTag(object.asDouble() + second.asDouble());
@@ -1821,7 +1873,7 @@ public class ElementTag implements ObjectTag {
                 return null;
             }
             try {
-                return new ElementTag(object.asBigDecimal().divide(second.asBigDecimal(), 64, RoundingMode.HALF_UP));
+                return new ElementTag(object.asBigDecimalRaw().divide(second.asBigDecimalRaw(), 64, RoundingMode.HALF_UP));
             }
             catch (Throwable e) {
                 return new ElementTag(object.asDouble() / second.asDouble());
@@ -1843,10 +1895,21 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' or '" + second + "' is not a valid decimal number!");
                 return null;
             }
+            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+                try {
+                    return decimalOf(Long.parseLong(object.element) % Long.parseLong(second.element));
+                }
+                catch (ArithmeticException e) {
+                }
+            }
             try {
                 // Note: "remainder" method has doc "Note that this is not the modulo operation (the result can be negative)."
                 // however this doc is misleading - standard modulo with "%" allows negatives in the exact same situation (first parameter is negative).
-                return new ElementTag(object.asBigDecimal().remainder(second.asBigDecimal()));
+                BigDecimal result = object.asBigDecimalRaw().remainder(second.asBigDecimalRaw());
+                if (wouldFormatScientific(result)) {
+                    result = object.asBigDecimal().remainder(second.asBigDecimal());
+                }
+                return new ElementTag(result);
             }
             catch (Throwable e) {
                 return new ElementTag(object.asDouble() % second.asDouble());
@@ -1868,8 +1931,19 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' or '" + second + "' is not a valid decimal number!");
                 return null;
             }
+            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+                try {
+                    return decimalOf(Math.multiplyExact(Long.parseLong(object.element), Long.parseLong(second.element)));
+                }
+                catch (ArithmeticException e) {
+                }
+            }
             try {
-                return new ElementTag(object.asBigDecimal().multiply(second.asBigDecimal()));
+                BigDecimal result = object.asBigDecimalRaw().multiply(second.asBigDecimalRaw());
+                if (wouldFormatScientific(result)) {
+                    result = object.asBigDecimal().multiply(second.asBigDecimal());
+                }
+                return new ElementTag(result);
             }
             catch (Throwable e) {
                 return new ElementTag(object.asDouble() * second.asDouble());
@@ -1891,8 +1965,19 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' or '" + second + "' is not a valid decimal number!");
                 return null;
             }
+            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+                try {
+                    return decimalOf(Math.subtractExact(Long.parseLong(object.element), Long.parseLong(second.element)));
+                }
+                catch (ArithmeticException e) {
+                }
+            }
             try {
-                return new ElementTag(object.asBigDecimal().subtract(second.asBigDecimal()));
+                BigDecimal result = object.asBigDecimalRaw().subtract(second.asBigDecimalRaw());
+                if (wouldFormatScientific(result)) {
+                    result = object.asBigDecimal().subtract(second.asBigDecimal());
+                }
+                return new ElementTag(result);
             }
             catch (Throwable e) {
                 return new ElementTag(object.asDouble() - second.asDouble());

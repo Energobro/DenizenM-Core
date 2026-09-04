@@ -74,8 +74,8 @@ public class Comparable {
 
     private static boolean compareDecimal(ObjectTag objA, ObjectTag objB, Operator operator, TagContext context) {
         try {
-            BigDecimal bigDecA = objA.asElement().asBigDecimal();
-            BigDecimal bigDecB = objB.asElement().asBigDecimal();
+            BigDecimal bigDecA = objA.asElement().asBigDecimalRaw();
+            BigDecimal bigDecB = objB.asElement().asBigDecimalRaw();
             int compared = bigDecA.compareTo(bigDecB);
             switch (operator) {
                 case LESS:
