@@ -29,20 +29,30 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
     }
 
     public ObjectTag getFlagValueOfType(String key, StringHolder type) {
-        List<String> splitKey = CoreUtilities.split(key, '.');
-        MapTag map = getRootMap(splitKey.get(0));
+        if (CoreUtilities.contains(key, '.')) {
+            return getDeepFlagValueOfType(CoreUtilities.split(key, '.'), type);
+        }
+        MapTag map = getRootMap(key);
         if (map == null) {
             return null;
         }
         if (isExpired(map.getObject(expirationString))) {
             return null;
         }
-        if (splitKey.size() == 1) {
-            ObjectTag returnValue = map.getObject(type);
-            if (returnValue instanceof MapTag) {
-                return deflaggedSubMap((MapTag) returnValue);
-            }
-            return returnValue;
+        ObjectTag returnValue = map.getObject(type);
+        if (returnValue instanceof MapTag) {
+            return deflaggedSubMap((MapTag) returnValue);
+        }
+        return returnValue;
+    }
+
+    public ObjectTag getDeepFlagValueOfType(List<String> splitKey, StringHolder type) {
+        MapTag map = getRootMap(splitKey.get(0));
+        if (map == null) {
+            return null;
+        }
+        if (isExpired(map.getObject(expirationString))) {
+            return null;
         }
         ObjectTag rootValue = map.getObject(valueString);
         if (!(rootValue instanceof MapTag)) {
@@ -186,10 +196,10 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
     public void setFlag(String key, ObjectTag value, TimeTag expiration, boolean doFlaggify) {
         // Split and built before the lock is taken. Neither reads what is stored, and converting a value can be real work -
         // holding the lock through it would be holding it against the main thread for no reason.
-        List<String> splitKey = CoreUtilities.split(key, '.');
+        List<String> splitKey = CoreUtilities.contains(key, '.') ? CoreUtilities.split(key, '.') : null;
         MapTag resultMap = value == null ? null : buildFlagMap(value, expiration, doFlaggify);
         synchronized (getWriteLock()) {
-            if (splitKey.size() == 1) {
+            if (splitKey == null) {
                 // A flat key replaces its root map whole, and the root storage publishes that in one step - there is nothing to tear.
                 setRootMap(key, resultMap);
                 return;
