@@ -161,9 +161,9 @@ public class RepeatCommand extends BracedCommand {
                 ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
-            queue.addDefinition(datum.valueHolder, new ElementTag(String.valueOf(datum.index)));
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
+            queue.addDefinition(datum.valueHolder, new ElementTag(String.valueOf(datum.index)));
         }
     }
 

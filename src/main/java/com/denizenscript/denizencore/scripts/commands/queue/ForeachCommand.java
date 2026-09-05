@@ -199,14 +199,11 @@ public class ForeachCommand extends BracedCommand {
                 datum.keyName = keyName;
                 datum.keyHolder = new StringHolder(datum.keyName);
                 datum.originalKeyValue = queue.getDefinitionObject(datum.keyName);
-                queue.addDefinition(datum.keyName, datum.keys.get(0));
             }
             datum.valueName = asName;
             datum.valueHolder = new StringHolder(datum.valueName);
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
             datum.originalIndexValue = queue.getDefinitionObject("loop_index");
-            queue.addDefinition(datum.valueName, datum.list.getObject(0));
-            queue.addDefinition("loop_index", new ElementTag("1"));
             if (freshBody) {
                 for (ScriptEntry cmd : bracedCommandsList) {
                     cmd.setInstant(true);
@@ -215,6 +212,11 @@ public class ForeachCommand extends BracedCommand {
             }
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
+            if (datum.keys != null) {
+                queue.addDefinition(datum.keyName, datum.keys.get(0));
+            }
+            queue.addDefinition(datum.valueName, datum.list.getObject(0));
+            queue.addDefinition("loop_index", new ElementTag("1"));
         }
     }
 

@@ -202,9 +202,9 @@ public class WhileCommand extends BracedCommand {
                 ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
             datum.originalIndexValue = queue.getDefinitionObject("loop_index");
-            queue.addDefinition("loop_index", "1");
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
+            queue.addDefinition("loop_index", "1");
         }
     }
 }

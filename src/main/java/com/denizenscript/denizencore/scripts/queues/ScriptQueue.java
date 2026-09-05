@@ -706,6 +706,31 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         return script_entries;
     }
 
+    /**
+     * Visits every entry that may still run, which is more than {@link #getEntries()}: a loop's body is only on the queue while that
+     * iteration is running, and between iterations it is held by the frame instead. Anything that rewrites pending entries - the
+     * player or NPC a queue is linked to, above all - has to reach the bodies too, or a loop keeps running against the old value.
+     * <p>
+     * A loop's owner is the one entry here whose {@link ScriptEntry#getContext()} outlives a single execution - every other entry gets
+     * a fresh one from {@link ScriptEngine#prepareEntry} as it runs - so its context is rebuilt after the visit, or the entry's data and
+     * the context derived from it would disagree for the rest of the loop.
+     */
+    public final void forEachPendingEntry(Consumer<ScriptEntry> action) {
+        for (ScriptEntry entry : script_entries) {
+            action.accept(entry);
+        }
+        if (loopFrames != null) {
+            for (int i = 0; i < loopFrames.size(); i++) {
+                LoopFrame frame = loopFrames.get(i);
+                action.accept(frame.owner);
+                frame.owner.updateContext();
+                for (int j = 0; j < frame.body.size(); j++) {
+                    action.accept(frame.body.get(j));
+                }
+            }
+        }
+    }
+
     public final void injectEntriesAtStart(List<ScriptEntry> entries) {
         script_entries.addAllToStart(entries);
     }
