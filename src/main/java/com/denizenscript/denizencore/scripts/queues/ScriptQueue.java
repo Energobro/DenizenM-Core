@@ -474,21 +474,28 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             return;
         }
         // DUUIDs v2.5
-        int size = QueueWordList.FinalWordList.size();
-        Random random = CoreUtilities.getRandom();
-        String wordsRaw = "";
         debugIdWords = null;
+        StringBuilder idBuilder = new StringBuilder(prefix.length() + 32);
+        if (CoreConfiguration.queueIdPrefix) {
+            idBuilder.append(prefix).append('_');
+        }
+        if (CoreConfiguration.queueIdNumeric) {
+            idBuilder.append(numericId);
+            if (CoreConfiguration.queueIdWords) {
+                idBuilder.append('_');
+            }
+        }
         if (CoreConfiguration.queueIdWords) {
+            int size = QueueWordList.FinalWordList.size();
+            Random random = CoreUtilities.getRandom();
             String[] words = new String[2 + depth];
-            StringBuilder rawBuilder = new StringBuilder();
             for (int i = 0; i < words.length; i++) {
                 words[i] = QueueWordList.FinalWordList.get(random.nextInt(size));
-                rawBuilder.append(words[i]);
+                idBuilder.append(words[i]);
             }
-            wordsRaw = rawBuilder.toString();
             debugIdWords = words;
         }
-        id = (CoreConfiguration.queueIdPrefix ? prefix + "_" : "") + (CoreConfiguration.queueIdNumeric ? numericId + (CoreConfiguration.queueIdWords ? "_" : "") : "") + (CoreConfiguration.queueIdWords ? wordsRaw : "");
+        id = idBuilder.toString();
         debugIdPrefix = prefix;
         debugIdNumeric = numericId;
         debugId = null;
