@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.objects.core.ScriptTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -50,10 +51,7 @@ public class ReplaceableTagEvent {
 
         public int skippable = 0;
 
-        /** TEMPORARY tag-shape measurement, remove with the counters in TagManager. Classified once per distinct tag, -1 until then. */
-        public byte shapeKind = -1;
-
-        public com.denizenscript.denizencore.utilities.text.StringHolder plainDefinitionKey = null;
+        public StringHolder plainDefinitionKey = null;
 
         public ObjectTag rawObject = null;
     }
