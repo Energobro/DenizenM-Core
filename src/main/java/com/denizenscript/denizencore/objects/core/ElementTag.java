@@ -182,6 +182,7 @@ public class ElementTag implements ObjectTag {
         this.prefix = "number";
         this.element = String.valueOf(integer);
         this.isPlainText = true;
+        this.numberCache = Long.valueOf(integer);
     }
 
     public ElementTag(byte byt) {
@@ -200,6 +201,7 @@ public class ElementTag implements ObjectTag {
         this.prefix = "number";
         this.element = String.valueOf(lng);
         this.isPlainText = true;
+        this.numberCache = element.length() <= 18 ? (Object) Long.valueOf(lng) : (Object) Double.valueOf((double) lng);
     }
 
     public ElementTag(BigDecimal bdl) {
@@ -212,6 +214,15 @@ public class ElementTag implements ObjectTag {
         this.prefix = "decimal";
         this.element = CoreUtilities.doubleToString(dbl);
         this.isPlainText = true;
+        if (Double.isNaN(dbl) || Double.isInfinite(dbl)) {
+            this.numberCache = NOT_NUMERIC;
+        }
+        else if (element.length() <= 18 && (long) dbl == dbl) {
+            this.numberCache = Long.valueOf((long) dbl);
+        }
+        else {
+            this.numberCache = Double.valueOf(dbl);
+        }
     }
 
     public ElementTag(float flt) {
@@ -288,7 +299,51 @@ public class ElementTag implements ObjectTag {
         return result;
     }
 
+    private static final Object NOT_NUMERIC = new Object();
+
+    private Object numberCache;
+
+    /**
+     * The element's numeric value: a {@link Long} when the text is what {@link #isPlainLong} accepts, a {@link Double} when it is any
+     * other plain number, or {@link #NOT_NUMERIC} (by identity) when it is not a number at all.
+     * <p>
+     * The text is final, so the answer never changes and the field is only ever written with a value derived from it - two threads
+     * racing here compute the same result, and only a reference is written, never a long or a double. Percentage syntax is deliberately
+     * not handled: {@link #asDouble()} still parses that itself.
+     */
+    private Object resolveNumber() {
+        Object cached = numberCache;
+        if (cached != null) {
+            return cached;
+        }
+        Object resolved = NOT_NUMERIC;
+        try {
+            if (isPlainLong(element)) {
+                resolved = Long.valueOf(Long.parseLong(element));
+            }
+            else if (ArgumentHelper.matchesDouble(element)) {
+                double parsed = Double.parseDouble(element);
+                if (!Double.isNaN(parsed)) {
+                    resolved = Double.valueOf(parsed);
+                }
+            }
+        }
+        catch (NumberFormatException ex) {
+        }
+        numberCache = resolved;
+        return resolved;
+    }
+
+    /** The element's value as a long, or null when {@link #isPlainLong} does not accept the text. */
+    public Long asPlainLong() {
+        return resolveNumber() instanceof Long value ? value : null;
+    }
+
     public double asDouble() {
+        Object cached = resolveNumber();
+        if (cached != NOT_NUMERIC) {
+            return ((Number) cached).doubleValue();
+        }
         return Double.parseDouble(percentageMatcher.trimToNonMatches(element));
     }
 
@@ -336,17 +391,7 @@ public class ElementTag implements ObjectTag {
     }
 
     public boolean isDouble() {
-        try {
-            if (!ArgumentHelper.matchesDouble(element)) {
-                return false;
-            }
-            if (!Double.isNaN(Double.parseDouble(element))) {
-                return true;
-            }
-        }
-        catch (Exception e) {
-        }
-        return false;
+        return resolveNumber() != NOT_NUMERIC;
     }
 
     public boolean isFloat() {
@@ -1838,9 +1883,10 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' is not a valid decimal number!");
                 return null;
             }
-            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+            Long objectLong = object.asPlainLong(), secondLong = second.asPlainLong();
+            if (objectLong != null && secondLong != null) {
                 try {
-                    return decimalOf(Math.addExact(Long.parseLong(object.element), Long.parseLong(second.element)));
+                    return decimalOf(Math.addExact(objectLong, secondLong));
                 }
                 catch (ArithmeticException e) {
                 }
@@ -1895,9 +1941,10 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' or '" + second + "' is not a valid decimal number!");
                 return null;
             }
-            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+            Long objectLong = object.asPlainLong(), secondLong = second.asPlainLong();
+            if (objectLong != null && secondLong != null) {
                 try {
-                    return decimalOf(Long.parseLong(object.element) % Long.parseLong(second.element));
+                    return decimalOf(objectLong % secondLong);
                 }
                 catch (ArithmeticException e) {
                 }
@@ -1931,9 +1978,10 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' or '" + second + "' is not a valid decimal number!");
                 return null;
             }
-            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+            Long objectLong = object.asPlainLong(), secondLong = second.asPlainLong();
+            if (objectLong != null && secondLong != null) {
                 try {
-                    return decimalOf(Math.multiplyExact(Long.parseLong(object.element), Long.parseLong(second.element)));
+                    return decimalOf(Math.multiplyExact(objectLong, secondLong));
                 }
                 catch (ArithmeticException e) {
                 }
@@ -1965,9 +2013,10 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' or '" + second + "' is not a valid decimal number!");
                 return null;
             }
-            if (isPlainLong(object.element) && isPlainLong(second.element)) {
+            Long objectLong = object.asPlainLong(), secondLong = second.asPlainLong();
+            if (objectLong != null && secondLong != null) {
                 try {
-                    return decimalOf(Math.subtractExact(Long.parseLong(object.element), Long.parseLong(second.element)));
+                    return decimalOf(Math.subtractExact(objectLong, secondLong));
                 }
                 catch (ArithmeticException e) {
                 }
