@@ -403,6 +403,8 @@ public class CoreUtilities {
         floatFormat.setMaximumFractionDigits(8);
     }
 
+    private static final ThreadLocal<DecimalFormat> localFloatFormat = ThreadLocal.withInitial(() -> (DecimalFormat) floatFormat.clone());
+
     public static String floatToCleanString(float input) {
         if (Float.isNaN(input)) {
             return "NaN";
@@ -427,7 +429,11 @@ public class CoreUtilities {
             }
             return "infinity";
         }
-        return floatFormat.format(input);
+        String whole = wholeNumberToString(input);
+        if (whole != null) {
+            return whole;
+        }
+        return localFloatFormat.get().format(input);
     }
 
     public static String doubleToString(double input) {
@@ -440,7 +446,63 @@ public class CoreUtilities {
             }
             return "infinity";
         }
-        return df.format(input);
+        String whole = wholeNumberToString(input);
+        if (whole != null) {
+            return whole;
+        }
+        String text = Double.toString(input);
+        int expAt = text.indexOf('E');
+        if (expAt < 0) {
+            return text.endsWith(".0") ? text.substring(0, text.length() - 2) : text;
+        }
+        return expandExponent(text, expAt);
+    }
+
+    private static String wholeNumberToString(double input) {
+        long asLong = (long) input;
+        if (asLong != input || Math.abs(input) >= 1e15) {
+            return null;
+        }
+        if (asLong == 0 && Double.doubleToRawLongBits(input) != 0L) {
+            return "-0";
+        }
+        return Long.toString(asLong);
+    }
+
+    private static String expandExponent(String text, int expAt) {
+        boolean negative = text.charAt(0) == '-';
+        int start = negative ? 1 : 0;
+        int dotAt = text.indexOf('.', start);
+        int exponent = Integer.parseInt(text.substring(expAt + 1));
+        StringBuilder digits = new StringBuilder(text.length());
+        digits.append(text, start, dotAt).append(text, dotAt + 1, expAt);
+        int pointPos = (dotAt - start) + exponent;
+        int end = digits.length();
+        while (end > 1 && digits.charAt(end - 1) == '0') {
+            end--;
+        }
+        digits.setLength(end);
+        StringBuilder output = new StringBuilder(Math.max(end, Math.abs(pointPos)) + 4);
+        if (negative) {
+            output.append('-');
+        }
+        if (pointPos <= 0) {
+            output.append("0.");
+            for (int i = 0; i < -pointPos; i++) {
+                output.append('0');
+            }
+            output.append(digits);
+        }
+        else if (pointPos >= end) {
+            output.append(digits);
+            for (int i = end; i < pointPos; i++) {
+                output.append('0');
+            }
+        }
+        else {
+            output.append(digits, 0, pointPos).append('.').append(digits, pointPos, end);
+        }
+        return output.toString();
     }
 
     static boolean isScriptFilename(String fileName) { // Note: can be called async
