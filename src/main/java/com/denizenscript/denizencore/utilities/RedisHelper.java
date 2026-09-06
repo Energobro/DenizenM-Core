@@ -15,7 +15,6 @@ import redis.clients.jedis.JedisPubSub;
 import redis.clients.jedis.util.SafeEncoder;
 
 import java.util.Arrays;
-import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.List;
 import java.util.Map;

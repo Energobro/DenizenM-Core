@@ -12,7 +12,6 @@ import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.commands.Holdable;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 
-import java.util.ArrayList;
 import java.util.List;
 
 public class WaitUntilCommand extends AbstractCommand implements Holdable {
