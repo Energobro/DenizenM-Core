@@ -141,11 +141,15 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
 
     public static boolean isStaticLine(ScriptEntry scriptEntry) {
         for (ScriptEntry.InternalArgument internalArg : scriptEntry.internal.arguments_to_use) {
-            if (internalArg.shouldParse) {
+            if (isTagged(internalArg) || (internalArg.prefix != null && isTagged(internalArg.prefix))) {
                 return false;
             }
         }
         return !(scriptEntry.internal.yamlSubcontent instanceof Map) || isFixedText(scriptEntry.internal.yamlSubcontent);
+    }
+
+    public static boolean isTagged(ScriptEntry.InternalArgument internalArg) {
+        return internalArg.value == null || internalArg.value.hasTag;
     }
 
     @Override
