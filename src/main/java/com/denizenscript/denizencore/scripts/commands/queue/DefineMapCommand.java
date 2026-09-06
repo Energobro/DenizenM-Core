@@ -80,6 +80,8 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
         return yamlSubcontent == null || !CoreUtilities.contains(yamlSubcontent.toString(), '<');
     }
 
+    public static final Object REBUILT_EVERY_RUN = new Object();
+
     public static class CachedMap {
 
         public StringHolder key;
@@ -115,31 +117,35 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
                 arg.reportUnhandled();
             }
         }
-        boolean isStaticLine = !anyUnhandled;
         if (scriptEntry.internal.yamlSubcontent instanceof Map) {
             MapTag map = (MapTag) CoreUtilities.objectToTagForm(scriptEntry.internal.yamlSubcontent, scriptEntry.getContext(), true, true);
             value.putAll(map);
-            isStaticLine = isStaticLine && isFixedText(scriptEntry.internal.yamlSubcontent);
         }
         scriptEntry.addObject("map", value);
         if (!scriptEntry.hasObject("definition")) {
             throw new InvalidArgumentsException("Must specify a definition and value!");
         }
-        if (isStaticLine) {
-            for (ScriptEntry.InternalArgument internalArg : scriptEntry.internal.arguments_to_use) {
-                if (internalArg.shouldParse) {
-                    isStaticLine = false;
-                    break;
-                }
+        if (scriptEntry.internal.specialProcessedData == REBUILT_EVERY_RUN) {
+            return;
+        }
+        if (anyUnhandled || !isStaticLine(scriptEntry)) {
+            scriptEntry.internal.specialProcessedData = REBUILT_EVERY_RUN;
+            return;
+        }
+        CachedMap cached = new CachedMap();
+        cached.definition = scriptEntry.getElement("definition");
+        cached.key = StringHolder.ofLowered(CoreUtilities.toLowerCase(cached.definition.asString()));
+        cached.template = value;
+        scriptEntry.internal.specialProcessedData = cached;
+    }
+
+    public static boolean isStaticLine(ScriptEntry scriptEntry) {
+        for (ScriptEntry.InternalArgument internalArg : scriptEntry.internal.arguments_to_use) {
+            if (internalArg.shouldParse) {
+                return false;
             }
         }
-        if (isStaticLine) {
-            CachedMap cached = new CachedMap();
-            cached.definition = scriptEntry.getElement("definition");
-            cached.key = StringHolder.ofLowered(CoreUtilities.toLowerCase(cached.definition.asString()));
-            cached.template = value;
-            scriptEntry.internal.specialProcessedData = cached;
-        }
+        return !(scriptEntry.internal.yamlSubcontent instanceof Map) || isFixedText(scriptEntry.internal.yamlSubcontent);
     }
 
     @Override
