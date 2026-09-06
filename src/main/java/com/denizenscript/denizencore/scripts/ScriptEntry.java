@@ -439,12 +439,22 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         return internal.bracedSet;
     }
 
+    private ScriptEntryData contextData;
+
+    private int contextChangeCounter;
+
     public TagContext getContext() {
         return context;
     }
 
     public void updateContext() {
+        if (context != null && contextData == entryData && contextChangeCounter == entryData.changeCounter
+                && context.definitionProvider == queue && context.contextSource == (queue == null ? null : queue.contextSource)) {
+            return;
+        }
         context = DenizenCore.implementation.getTagContext(this);
+        contextData = entryData;
+        contextChangeCounter = entryData.changeCounter;
     }
 
     public void setBracedSet(List<BracedCommand.BracedData> set) {

@@ -8,6 +8,12 @@ public abstract class ScriptEntryData implements Cloneable {
 
     public ScriptEntry scriptEntry;
 
+    public int changeCounter;
+
+    public final void markChanged() {
+        changeCounter++;
+    }
+
     @Override
     public ScriptEntryData clone() {
         try {
