@@ -12,6 +12,7 @@ import com.denizenscript.denizencore.utilities.debugging.Debug;
 
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.function.Predicate;
 
 public class Attribute implements TagContext.ShowErrorsMethod {
 
@@ -431,6 +432,23 @@ public class Attribute implements TagContext.ShowErrorsMethod {
             return null;
         }
         return contextObj.asType(dClass, context);
+    }
+
+    /**
+     * Returns the parameter as the given type, or null if it is absent or is not that type.
+     * <p>
+     * The matcher is the type's own {@code matches(String)} and is only consulted for a parameter that is not already the type - a
+     * parameter that is takes neither the text it would be written as nor the parse of that text back.
+     */
+    public final <T extends ObjectTag> T paramAsTypeIfMatches(Class<T> dClass, Predicate<String> matcher) {
+        ObjectTag contextObj = getParamObject();
+        if (contextObj == null) {
+            return null;
+        }
+        if (contextObj.getClass() == dClass) {
+            return (T) contextObj;
+        }
+        return matcher.test(contextObj.toString()) ? contextObj.asType(dClass, context) : null;
     }
 
     @Deprecated
