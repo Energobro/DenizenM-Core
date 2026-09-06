@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.commands.Holdable;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.Map;
 
@@ -59,8 +60,20 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
     //
     // -->
 
+    public static class CachedMap {
+
+        public StringHolder key;
+
+        public ElementTag definition;
+
+        public MapTag template;
+    }
+
     @Override
     public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
+        if (scriptEntry.internal.specialProcessedData instanceof CachedMap) {
+            return;
+        }
         MapTag value = new MapTag();
         for (Argument arg : scriptEntry) {
             if (!scriptEntry.hasObject("definition")
@@ -80,23 +93,40 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
                 arg.reportUnhandled();
             }
         }
-        if (scriptEntry.internal.yamlSubcontent instanceof Map) {
+        boolean isStaticLine = !(scriptEntry.internal.yamlSubcontent instanceof Map);
+        if (!isStaticLine) {
             MapTag map = (MapTag) CoreUtilities.objectToTagForm(scriptEntry.internal.yamlSubcontent, scriptEntry.getContext(), true, true);
             value.putAll(map);
         }
         scriptEntry.addObject("map", value);
-        if (!scriptEntry.hasObject("definition") || !scriptEntry.hasObject("map")) {
+        if (!scriptEntry.hasObject("definition")) {
             throw new InvalidArgumentsException("Must specify a definition and value!");
+        }
+        if (isStaticLine) {
+            for (ScriptEntry.InternalArgument internalArg : scriptEntry.internal.arguments_to_use) {
+                if (internalArg.shouldParse) {
+                    isStaticLine = false;
+                    break;
+                }
+            }
+        }
+        if (isStaticLine) {
+            CachedMap cached = new CachedMap();
+            cached.definition = scriptEntry.getElement("definition");
+            cached.key = StringHolder.ofLowered(CoreUtilities.toLowerCase(cached.definition.asString()));
+            cached.template = value;
+            scriptEntry.internal.specialProcessedData = cached;
         }
     }
 
     @Override
     public void execute(ScriptEntry scriptEntry) {
-        ElementTag definition = scriptEntry.getElement("definition");
-        MapTag value = scriptEntry.getObjectTag("map");
+        CachedMap cached = scriptEntry.internal.specialProcessedData instanceof CachedMap ? (CachedMap) scriptEntry.internal.specialProcessedData : null;
+        ElementTag definition = cached != null ? cached.definition : scriptEntry.getElement("definition");
+        MapTag value = cached != null ? cached.template : scriptEntry.getObjectTag("map");
         if (scriptEntry.dbCallShouldDebug()) {
             Debug.report(scriptEntry, getName(), new QueueTag(scriptEntry.getResidingQueue()), definition, value);
         }
-        scriptEntry.getResidingQueue().addDefinition(definition.asString(), value.duplicate());
+        scriptEntry.getResidingQueue().addDefinition(cached != null ? cached.key : StringHolder.ofLowered(CoreUtilities.toLowerCase(definition.asString())), value.duplicate());
     }
 }
