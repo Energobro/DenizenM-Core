@@ -60,6 +60,26 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
     //
     // -->
 
+    public static boolean isFixedText(Object yamlSubcontent) {
+        if (yamlSubcontent instanceof Map) {
+            for (Object subObj : ((Map<?, ?>) yamlSubcontent).values()) {
+                if (!isFixedText(subObj)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        if (yamlSubcontent instanceof Iterable) {
+            for (Object subObj : (Iterable<?>) yamlSubcontent) {
+                if (!isFixedText(subObj)) {
+                    return false;
+                }
+            }
+            return true;
+        }
+        return yamlSubcontent == null || !CoreUtilities.contains(yamlSubcontent.toString(), '<');
+    }
+
     public static class CachedMap {
 
         public StringHolder key;
@@ -75,6 +95,7 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
             return;
         }
         MapTag value = new MapTag();
+        boolean anyUnhandled = false;
         for (Argument arg : scriptEntry) {
             if (!scriptEntry.hasObject("definition")
                     && !arg.hasPrefix()) {
@@ -90,13 +111,15 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
                 value.putObject(arg.getRawValue().substring(0, colon), new ElementTag(arg.getRawValue().substring(colon + 1)));
             }
             else {
+                anyUnhandled = true;
                 arg.reportUnhandled();
             }
         }
-        boolean isStaticLine = !(scriptEntry.internal.yamlSubcontent instanceof Map);
-        if (!isStaticLine) {
+        boolean isStaticLine = !anyUnhandled;
+        if (scriptEntry.internal.yamlSubcontent instanceof Map) {
             MapTag map = (MapTag) CoreUtilities.objectToTagForm(scriptEntry.internal.yamlSubcontent, scriptEntry.getContext(), true, true);
             value.putAll(map);
+            isStaticLine = isStaticLine && isFixedText(scriptEntry.internal.yamlSubcontent);
         }
         scriptEntry.addObject("map", value);
         if (!scriptEntry.hasObject("definition")) {
