@@ -19,7 +19,6 @@ import com.denizenscript.denizencore.tags.core.EscapeTagUtil;
 
 import java.io.File;
 import java.sql.*;
-import java.util.HashMap;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.Map;
 import java.util.Properties;
