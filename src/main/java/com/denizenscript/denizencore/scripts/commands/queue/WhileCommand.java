@@ -101,7 +101,7 @@ public class WhileCommand extends BracedCommand {
         if (owner.dbCallShouldDebug()) {
             Debug.echoDebug(owner, Debug.DebugElement.Header, "While loop " + data.index);
         }
-        queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(String.valueOf(data.index)));
+        queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
         return true;
     };
 
@@ -204,7 +204,7 @@ public class WhileCommand extends BracedCommand {
             datum.originalIndexValue = queue.getDefinitionObject("loop_index");
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
-            queue.addDefinition("loop_index", "1");
+            queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(1));
         }
     }
 }

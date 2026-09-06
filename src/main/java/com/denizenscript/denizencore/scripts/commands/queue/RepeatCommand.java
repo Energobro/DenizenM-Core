@@ -163,7 +163,7 @@ public class RepeatCommand extends BracedCommand {
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
-            queue.addDefinition(datum.valueHolder, new ElementTag(String.valueOf(datum.index)));
+            queue.addDefinition(datum.valueHolder, new ElementTag(datum.index));
         }
     }
 
@@ -180,7 +180,7 @@ public class RepeatCommand extends BracedCommand {
         if (owner.dbCallShouldDebug()) {
             Debug.echoDebug(owner, Debug.DebugElement.Header, "Repeat loop " + data.index);
         }
-        queue.addDefinition(data.valueHolder, new ElementTag(String.valueOf(data.index)));
+        queue.addDefinition(data.valueHolder, new ElementTag(data.index));
         return true;
     };
 }

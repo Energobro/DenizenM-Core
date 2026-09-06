@@ -216,7 +216,7 @@ public class ForeachCommand extends BracedCommand {
                 queue.addDefinition(datum.keyName, datum.keys.get(0));
             }
             queue.addDefinition(datum.valueName, datum.list.getObject(0));
-            queue.addDefinition("loop_index", new ElementTag("1"));
+            queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(1));
         }
     }
 
