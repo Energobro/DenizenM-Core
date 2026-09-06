@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.scripts.commands.generator.ArgDefaultNull;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.scripts.queues.core.AsyncQueue;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
@@ -287,7 +288,8 @@ public class AsyncCommand extends BracedCommand {
     public static void mergeDetachedDefinitions(ScriptQueue outerQueue, AsyncQueue subQueue) {
         for (String key : subQueue.trackedDefinitionWrites) {
             // A definition the block removed reads back as null here, which 'putObject' turns into a removal on the outer queue too.
-            outerQueue.definitions.putObject(key, subQueue.definitions.getObject(key));
+            StringHolder holder = new StringHolder(key);
+            outerQueue.definitions.putObject(holder, subQueue.definitions.getObject(holder));
         }
     }
 
