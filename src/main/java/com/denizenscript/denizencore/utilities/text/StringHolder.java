@@ -39,11 +39,11 @@ public class StringHolder {
 
     @Override
     public boolean equals(Object obj) {
-        if (obj instanceof String) {
-            return CoreUtilities.equalsIgnoreCase(low, (String) obj);
+        if (obj instanceof StringHolder other) {
+            return low.equals(other.low);
         }
-        else if (obj instanceof StringHolder) {
-            return low.equals(((StringHolder) obj).low);
+        else if (obj instanceof String) {
+            return CoreUtilities.equalsIgnoreCase(low, (String) obj);
         }
         return false;
     }
