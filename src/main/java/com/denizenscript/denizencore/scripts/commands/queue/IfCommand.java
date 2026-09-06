@@ -11,6 +11,7 @@ import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
+import com.denizenscript.denizencore.tags.TagContext;
 import com.denizenscript.denizencore.tags.TagManager;
 
 import java.util.ArrayList;
@@ -470,13 +471,30 @@ public class IfCommand extends BracedCommand {
             return arg.toString();
         }
 
+        /**
+         * The context a condition reads its tags through.
+         * <p>
+         * The entry's own, built by {@link com.denizenscript.denizencore.scripts.queues.ScriptEngine#prepareEntry} immediately before the
+         * command ran and already installed as the current context by the executor. Building a fresh one per operand, as this used to,
+         * allocated two TagContexts for every comparison. The fallback is for a condition read outside an execution, where there is none yet.
+         */
+        public static TagContext contextFor(ScriptEntry scriptEntry) {
+            TagContext context = scriptEntry.getContext();
+            return context != null ? context : DenizenCore.implementation.getTagContext(scriptEntry);
+        }
+
+        /** Whether this argument's parsed form can be used directly - see the fallbacks in {@link #tagme}. */
+        private static boolean canUseParsed(ScriptEntry.InternalArgument arg, boolean canNegate) {
+            return arg.prefix == null && arg.value != null && !(canNegate && arg.fullOriginalRawValue.startsWith("!"));
+        }
+
         public static ArgInternal tagify(ScriptEntry scriptEntry, String arg, boolean canNegate) {
             ArgInternal toRet = new ArgInternal();
             if (arg.startsWith("!") && canNegate) {
                 toRet.negative = true;
                 arg = arg.substring(1);
             }
-            toRet.value = TagManager.tagObject(arg, DenizenCore.implementation.getTagContext(scriptEntry));
+            toRet.value = TagManager.tagObject(arg, contextFor(scriptEntry));
             return toRet;
         }
 
@@ -484,9 +502,13 @@ public class IfCommand extends BracedCommand {
             if (argObj instanceof String) {
                 return tagify(scriptEntry, (String) argObj, canNegate);
             }
-            else if (argObj instanceof ScriptEntry.InternalArgument) {
-                // TODO: Special case tag parsing
-                return tagify(scriptEntry, ((ScriptEntry.InternalArgument) argObj).fullOriginalRawValue, canNegate);
+            else if (argObj instanceof ScriptEntry.InternalArgument internalArg) {
+                if (canUseParsed(internalArg, canNegate)) {
+                    ArgInternal toRet = new ArgInternal();
+                    toRet.value = internalArg.value.parse(contextFor(scriptEntry));
+                    return toRet;
+                }
+                return tagify(scriptEntry, internalArg.fullOriginalRawValue, canNegate);
             }
             else if (argObj instanceof ArgInternal) {
                 return (ArgInternal) argObj;
@@ -501,6 +523,9 @@ public class IfCommand extends BracedCommand {
             else if (argObj instanceof Boolean) {
                 return (Boolean) argObj;
             }
+            else if (argObj instanceof ScriptEntry.InternalArgument internalArg && canUseParsed(internalArg, canNegate)) {
+                return internalArg.value.parse(contextFor(scriptEntry)).isTruthy();
+            }
             return tagme(scriptEntry, argObj, canNegate).boolify();
         }
 
@@ -508,6 +533,9 @@ public class IfCommand extends BracedCommand {
         public static ObjectTag tagvalue(ScriptEntry scriptEntry, Object argObj) {
             if (argObj instanceof Condition) {
                 return new ElementTag(((Condition) argObj).evaluate(scriptEntry));
+            }
+            if (argObj instanceof ScriptEntry.InternalArgument internalArg && canUseParsed(internalArg, false)) {
+                return internalArg.value.parse(contextFor(scriptEntry));
             }
             return tagme(scriptEntry, argObj, false).value;
         }
