@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 
@@ -122,18 +123,47 @@ public class ChooseCommand extends BracedCommand {
             }
         }
         ScriptEntry result = bracedCommandsList.get(resultIndex);
-        List<BracedData> new_commands = getBracedCommands(result);
-        if (new_commands == null || new_commands.isEmpty()) {
+        List<ScriptEntry> new_command_list = caseBodyFor(scriptEntry, resultIndex, result);
+        if (new_command_list == null) {
             Debug.echoError(scriptEntry, "Empty choose command case sub-commands (internal) for case '" + result.toString() + "'");
             return;
         }
-        List<ScriptEntry> new_command_list = new_commands.get(0).value;
-        for (ScriptEntry newEntry : new_command_list) {
-            newEntry.setInstant(true);
-            newEntry.entryData.transferDataFrom(scriptEntry.entryData);
-            newEntry.entryData.scriptEntry = newEntry;
-        }
         scriptEntry.setInstant(true);
         queue.injectEntriesAtStart(new_command_list);
+    }
+
+    /**
+     * The copy of one case's body, built once per entry and reused.
+     * <p>
+     * Indexed by case, the same way {@link IfCommand#branchBodyFor} indexes branches: which case runs varies per execution, but each one is
+     * the same lines every time, and the previous run's copy is always consumed from the queue before the entry can run again.
+     */
+    public static List<ScriptEntry> caseBodyFor(ScriptEntry scriptEntry, int index, ScriptEntry caseEntry) {
+        List<List<ScriptEntry>> cases = scriptEntry.inlinedBranches;
+        if (cases == null) {
+            cases = new ArrayList<>(index + 1);
+            scriptEntry.inlinedBranches = cases;
+        }
+        while (cases.size() <= index) {
+            cases.add(null);
+        }
+        List<ScriptEntry> body = cases.get(index);
+        if (body != null) {
+            ScriptEntry.resetBodyForReuse(body);
+            return body;
+        }
+        List<BracedData> caseBraces = getBracedCommands(caseEntry, false);
+        if (caseBraces == null || caseBraces.isEmpty()) {
+            return null;
+        }
+        body = duplicateBracedSection(caseBraces.get(0), scriptEntry);
+        if (body == null) {
+            return null;
+        }
+        for (ScriptEntry entry : body) {
+            entry.setInstant(true);
+        }
+        cases.set(index, body);
+        return body;
     }
 }

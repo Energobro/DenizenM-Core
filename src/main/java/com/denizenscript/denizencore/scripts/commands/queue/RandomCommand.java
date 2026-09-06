@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 
+import java.util.ArrayList;
 import java.util.List;
 
 public class RandomCommand extends BracedCommand {
@@ -62,7 +63,7 @@ public class RandomCommand extends BracedCommand {
 
     @Override
     public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        List<BracedData> bdat = getBracedCommands(scriptEntry);
+        List<BracedData> bdat = getBracedCommands(scriptEntry, false);
         if (bdat != null && bdat.size() > 0) {
             scriptEntry.addObject("braces", bdat);
         }
@@ -137,7 +138,36 @@ public class RandomCommand extends BracedCommand {
             queue.injectEntryAtStart(keeping);
         }
         else {
-            queue.injectEntryAtStart(bracedCommands.get(selected));
+            queue.injectEntryAtStart(optionFor(scriptEntry, selected, bracedCommands.get(selected)));
         }
+    }
+
+    /**
+     * The copy of one option of this random line, built once per entry and reused.
+     * <p>
+     * Indexed by option, the same way {@link IfCommand#branchBodyFor} indexes branches: which option runs varies per execution, but each
+     * one is the same line every time, and the previous run's copy is always consumed from the queue before the entry can run again.
+     */
+    public static ScriptEntry optionFor(ScriptEntry scriptEntry, int index, ScriptEntry source) {
+        List<List<ScriptEntry>> options = scriptEntry.inlinedBranches;
+        if (options == null) {
+            options = new ArrayList<>(index + 1);
+            scriptEntry.inlinedBranches = options;
+        }
+        while (options.size() <= index) {
+            options.add(null);
+        }
+        List<ScriptEntry> holder = options.get(index);
+        if (holder != null) {
+            ScriptEntry.resetBodyForReuse(holder);
+            return holder.get(0);
+        }
+        ScriptEntry copy = source.clone();
+        copy.entryData.transferDataFrom(scriptEntry.entryData);
+        copy.entryData.scriptEntry = copy;
+        holder = new ArrayList<>(1);
+        holder.add(copy);
+        options.set(index, holder);
+        return copy;
     }
 }
