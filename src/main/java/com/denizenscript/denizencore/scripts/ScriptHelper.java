@@ -170,7 +170,7 @@ public class ScriptHelper {
     public static YamlConfiguration loadConfig(String filename, InputStream resource) throws IOException { // Note: can be called async
         try {
             String script = clearComments(filename, convertStreamToString(resource, filename.endsWith(".dsc")), true);
-            return YamlConfiguration.load(script);
+            return YamlConfiguration.load(script, "script file '" + filename + "'");
         }
         finally {
             resource.close();

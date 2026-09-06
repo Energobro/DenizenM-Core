@@ -165,7 +165,7 @@ public class NoteManager {
             saveFilePath = new File(DenizenCore.implementation.getDataFolder(), "notables.yml").getPath();
         }
         String rawFileData = CoreUtilities.journallingLoadFile(saveFilePath);
-        saveConfig = rawFileData == null ? new YamlConfiguration() : YamlConfiguration.load(rawFileData);
+        saveConfig = rawFileData == null ? new YamlConfiguration() : YamlConfiguration.load(rawFileData, "the notables save file '" + saveFilePath + "'");
         if (saveConfig == null) {
             saveConfig = new YamlConfiguration();
         }

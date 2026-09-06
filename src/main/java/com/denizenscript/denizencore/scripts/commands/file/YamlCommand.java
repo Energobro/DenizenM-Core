@@ -8,6 +8,7 @@ import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.objects.core.MapTag;
+import com.denizenscript.denizencore.objects.core.ScriptTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.ScriptHelper;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
@@ -152,6 +153,11 @@ public class YamlCommand extends AbstractCommand implements Holdable {
             return null;
         }
         return yamlDocuments.get(CoreUtilities.toLowerCase(id));
+    }
+
+    public static String sourceDescription(ScriptEntry scriptEntry, String what) {
+        ScriptTag script = scriptEntry.getScript();
+        return script == null ? what : what + " (loaded by script '" + script.getName() + "', line " + scriptEntry.internal.lineNumber + ")";
     }
 
     public enum Action {LOAD, LOADTEXT, UNLOAD, CREATE, SAVE, SET, COPYKEY}
@@ -302,7 +308,7 @@ public class YamlCommand extends AbstractCommand implements Holdable {
                         FileInputStream fis = new FileInputStream(file);
                         String str = ScriptHelper.convertStreamToString(fis);
                         fis.close();
-                        runnableConfigs[0] = YamlConfiguration.load(str, rawFormat == null || !rawFormat.asBoolean());
+                        runnableConfigs[0] = YamlConfiguration.load(str, rawFormat == null || !rawFormat.asBoolean(), sourceDescription(scriptEntry, "yaml file '" + filename.asString() + "'"));
                         if (runnableConfigs[0] == null) {
                             runnableConfigs[0] = new YamlConfiguration();
                         }
@@ -324,7 +330,7 @@ public class YamlCommand extends AbstractCommand implements Holdable {
                 break;
             case LOADTEXT:
                 String str = rawText.asString();
-                YamlConfiguration config = YamlConfiguration.load(str);
+                YamlConfiguration config = YamlConfiguration.load(str, sourceDescription(scriptEntry, "yaml loadtext for id '" + id + "'"));
                 if (config == null) {
                     // Text that parses to nothing (empty, or not valid yaml) gives null here. The LOAD case above has always guarded this;
                     // this one did not, and quietly stored the null - which the document map can no longer hold now that it is concurrent.

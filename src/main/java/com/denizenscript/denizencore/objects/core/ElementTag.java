@@ -2636,7 +2636,7 @@ public class ElementTag implements ObjectTag {
         // Parses the input YAML or JSON text into a MapTag.
         // -->
         tagProcessor.registerStaticTag(MapTag.class, "parse_yaml", (attribute, object) -> {
-            return (MapTag) CoreUtilities.objectToTagForm(YamlConfiguration.load(object.asString()).contents, attribute.context);
+            return (MapTag) CoreUtilities.objectToTagForm(YamlConfiguration.load(object.asString(), "the parse_yaml tag input").contents, attribute.context);
         });
 
         // <--[tag]

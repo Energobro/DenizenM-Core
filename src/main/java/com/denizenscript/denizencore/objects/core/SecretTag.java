@@ -31,7 +31,7 @@ public class SecretTag implements ObjectTag {
             }
             fileContent = fileContent.substring("!SECRETS_FILE".length());
             try {
-                secretsFile = YamlConfiguration.load(fileContent);
+                secretsFile = YamlConfiguration.load(fileContent, "the secrets file (Denizen/secrets.secret)");
             }
             catch (MarkedYAMLException mye) {
                 Mark problem = mye.getProblemMark();

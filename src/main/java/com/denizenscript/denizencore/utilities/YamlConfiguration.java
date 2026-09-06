@@ -7,11 +7,18 @@ import org.yaml.snakeyaml.DumperOptions;
 import org.yaml.snakeyaml.LoaderOptions;
 import org.yaml.snakeyaml.Yaml;
 import org.yaml.snakeyaml.constructor.SafeConstructor;
+import org.yaml.snakeyaml.error.Mark;
+import org.yaml.snakeyaml.nodes.MappingNode;
+import org.yaml.snakeyaml.nodes.Node;
+import org.yaml.snakeyaml.nodes.NodeTuple;
+import org.yaml.snakeyaml.nodes.ScalarNode;
+import org.yaml.snakeyaml.nodes.Tag;
 import org.yaml.snakeyaml.representer.Representer;
 import org.yaml.snakeyaml.resolver.Resolver;
 import org.yaml.snakeyaml.scanner.ScannerImpl;
 
 import java.io.InputStream;
+import java.lang.reflect.Method;
 import java.util.*;
 
 /**
@@ -31,7 +38,57 @@ public class YamlConfiguration {
 
     private static volatile boolean hasModernYaml = true; // Note: can be called async
 
+    private static final Method setWarnOnDuplicateKeys = findSetWarnOnDuplicateKeys();
+
+    private static Method findSetWarnOnDuplicateKeys() {
+        try {
+            return LoaderOptions.class.getMethod("setWarnOnDuplicateKeys", boolean.class);
+        }
+        catch (Throwable ex) {
+            return null;
+        }
+    }
+
+    public static class SourcedConstructor extends SafeConstructor {
+
+        public final String source;
+
+        public SourcedConstructor(LoaderOptions options, String source) {
+            super(options);
+            this.source = source;
+        }
+
+        @Override
+        protected void flattenMapping(MappingNode node) {
+            List<NodeTuple> tuples = node.getValue();
+            if (tuples.size() > 1) {
+                HashSet<String> seen = new HashSet<>(tuples.size());
+                for (NodeTuple tuple : tuples) {
+                    Node keyNode = tuple.getKeyNode();
+                    if (keyNode instanceof ScalarNode && !Tag.MERGE.equals(keyNode.getTag()) && !seen.add(((ScalarNode) keyNode).getValue())) {
+                        reportDuplicateKey(((ScalarNode) keyNode).getValue(), keyNode.getStartMark(), source);
+                    }
+                }
+            }
+            super.flattenMapping(node);
+        }
+    }
+
+    public static void reportDuplicateKey(String key, Mark mark, String source) { // Note: can be called async
+        StringBuilder message = new StringBuilder("Duplicate YAML key '").append(key).append("'");
+        if (mark != null) {
+            message.append(" at line ").append(mark.getLine() + 1).append(", column ").append(mark.getColumn() + 1);
+        }
+        message.append(" of ").append(source == null ? "a YAML document" : source);
+        message.append(" - the last value for that key wins, the earlier one is lost.");
+        Debug.echoError(message.toString());
+    }
+
     public static Yaml createBaseYaml(boolean useCustomResolver) {
+        return createBaseYaml(useCustomResolver, null);
+    }
+
+    public static Yaml createBaseYaml(boolean useCustomResolver, String source) {
         DumperOptions options = new DumperOptions();
         options.setDefaultFlowStyle(DumperOptions.FlowStyle.BLOCK);
         options.setAllowUnicode(true);
@@ -46,8 +103,15 @@ public class YamlConfiguration {
         catch (NoSuchMethodError ignored) {
             hasModernYaml = false; // pre-1.32 snakeyaml
         }
+        if (setWarnOnDuplicateKeys != null) {
+            try {
+                setWarnOnDuplicateKeys.invoke(loaderOptions, false);
+            }
+            catch (Throwable ignored) {
+            }
+        }
         try {
-            safeCtor = new SafeConstructor(loaderOptions);
+            safeCtor = new SourcedConstructor(loaderOptions, source);
             reper = new Representer(options);
         }
         catch (NoSuchMethodError ignored) {
@@ -58,20 +122,32 @@ public class YamlConfiguration {
     }
 
     public static YamlConfiguration load(String data) {
-        return load(data, true);
+        return load(data, true, null);
+    }
+
+    public static YamlConfiguration load(String data, String source) {
+        return load(data, true, source);
     }
 
     public static YamlConfiguration load(String data, boolean useCustomResolver) {
-        Object obj = createBaseYaml(useCustomResolver).load(data);
+        return load(data, useCustomResolver, null);
+    }
+
+    public static YamlConfiguration load(String data, boolean useCustomResolver, String source) {
+        Object obj = createBaseYaml(useCustomResolver, source).load(data);
         return loadRaw(obj);
     }
 
     public static YamlConfiguration load(InputStream inputStream) {
-        return load(inputStream, true);
+        return load(inputStream, true, null);
     }
 
     public static YamlConfiguration load(InputStream inputStream, boolean useCustomResolver) {
-        Object obj = createBaseYaml(useCustomResolver).load(inputStream);
+        return load(inputStream, useCustomResolver, null);
+    }
+
+    public static YamlConfiguration load(InputStream inputStream, boolean useCustomResolver, String source) {
+        Object obj = createBaseYaml(useCustomResolver, source).load(inputStream);
         return loadRaw(obj);
     }
 

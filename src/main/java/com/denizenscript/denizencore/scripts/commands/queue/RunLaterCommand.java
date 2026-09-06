@@ -360,7 +360,7 @@ public class RunLaterCommand extends AbstractCommand {
         persistFilePath = path;
         String stored = CoreUtilities.journallingLoadFile(path);
         if (stored != null) {
-            load(YamlConfiguration.load(stored));
+            load(YamlConfiguration.load(stored, "the runlater save file '" + path + "'"));
         }
         timeLastSave = System.currentTimeMillis();
     }
