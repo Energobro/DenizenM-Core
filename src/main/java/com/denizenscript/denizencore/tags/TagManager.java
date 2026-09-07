@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.utilities.AsciiMatcher;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.DefinitionProvider;
+import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.utilities.codegen.TagCodeGenerator;
 import com.denizenscript.denizencore.utilities.codegen.TagNamer;
@@ -394,7 +395,13 @@ public class TagManager {
         if (fastDefinitionPathEnabled && data != null && data.plainDefinitionKey != null && !context.debug && !CoreConfiguration.debugOverride && !CoreConfiguration.debugVerbose) {
             DefinitionProvider provider = context.definitionProvider;
             if (provider != null) {
-                ObjectTag definition = provider.getDefinitionObject(data.plainDefinitionKey);
+                ObjectTag definition;
+                if (provider instanceof ScriptQueue queue) {
+                    definition = queue.getDefinitionSlot(tag, data.plainDefinitionKey);
+                }
+                else {
+                    definition = provider.getDefinitionObject(data.plainDefinitionKey);
+                }
                 if (definition != null) {
                     if (data.attribs.attributes.length == 1) {
                         return definition.refreshState();
@@ -505,6 +512,18 @@ public class TagManager {
 
     public static ParseableTag DEFAULT_PARSEABLE_EMPTY = new ParseableTag("");
 
+    public static final class SlotBinding {
+
+        public final DefinitionSlots table;
+
+        public final int slot;
+
+        public SlotBinding(DefinitionSlots table, int slot) {
+            this.table = table;
+            this.slot = slot;
+        }
+    }
+
     public static class ParseableTagPiece {
 
         public String content;
@@ -514,6 +533,8 @@ public class TagManager {
         public boolean isError = false;
 
         public ReplaceableTagEvent.ReferenceData tagData = null;
+
+        public SlotBinding binding = null;
 
         public ObjectTag rawObject;
 

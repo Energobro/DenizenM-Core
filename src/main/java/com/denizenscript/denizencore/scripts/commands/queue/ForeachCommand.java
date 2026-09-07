@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgRaw;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
+import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
@@ -93,6 +94,8 @@ public class ForeachCommand extends BracedCommand {
         public String valueName, keyName;
 
         public StringHolder valueHolder, keyHolder;
+        public DefinitionSlots slotTable;
+        public int valueSlot = DefinitionSlots.NO_SLOT, keySlot = DefinitionSlots.NO_SLOT, indexSlot = DefinitionSlots.NO_SLOT;
         public ObjectTag originalValue, originalKeyValue, originalIndexValue;
 
         public void reapplyAtEnd(ScriptQueue queue) {
@@ -204,6 +207,10 @@ public class ForeachCommand extends BracedCommand {
             datum.valueHolder = new StringHolder(datum.valueName);
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
             datum.originalIndexValue = queue.getDefinitionObject("loop_index");
+            datum.slotTable = scriptEntry.internal.slotTable;
+            datum.valueSlot = ScriptQueue.slotFor(scriptEntry, datum.valueHolder);
+            datum.keySlot = datum.keyHolder == null ? DefinitionSlots.NO_SLOT : ScriptQueue.slotFor(scriptEntry, datum.keyHolder);
+            datum.indexSlot = ScriptQueue.slotFor(scriptEntry, ScriptQueue.LOOP_INDEX_KEY);
             if (freshBody) {
                 for (ScriptEntry cmd : bracedCommandsList) {
                     cmd.setInstant(true);
@@ -215,8 +222,8 @@ public class ForeachCommand extends BracedCommand {
             if (datum.keys != null) {
                 queue.addDefinition(datum.keyName, datum.keys.get(0));
             }
-            queue.addDefinition(datum.valueName, datum.list.getObject(0));
-            queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(1));
+            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.list.getObject(0));
+            queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, new ElementTag(1));
         }
     }
 
@@ -233,11 +240,11 @@ public class ForeachCommand extends BracedCommand {
         if (owner.dbCallShouldDebug()) {
             Debug.echoDebug(owner, Debug.DebugElement.Header, "Foreach loop " + data.index);
         }
-        queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
+        queue.addDefinitionSlot(data.slotTable, data.indexSlot, ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
         if (data.keys != null) {
-            queue.addDefinition(data.keyHolder, new ElementTag(data.keys.get(data.index - 1)));
+            queue.addDefinitionSlot(data.slotTable, data.keySlot, data.keyHolder, new ElementTag(data.keys.get(data.index - 1)));
         }
-        queue.addDefinition(data.valueHolder, data.list.getObject(data.index - 1));
+        queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, data.list.getObject(data.index - 1));
         return true;
     };
 }

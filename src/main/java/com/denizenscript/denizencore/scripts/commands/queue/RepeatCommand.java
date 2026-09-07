@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.scripts.commands.generator.ArgLinear;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
+import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.EnumHelper;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.objects.core.ElementTag;
@@ -77,6 +78,8 @@ public class RepeatCommand extends BracedCommand {
 
         public StringHolder valueHolder;
         public ObjectTag originalValue;
+        public DefinitionSlots slotTable;
+        public int valueSlot = DefinitionSlots.NO_SLOT;
 
         public void reapplyAtEnd(ScriptQueue queue) {
             queue.addDefinition(valueName, originalValue);
@@ -161,9 +164,11 @@ public class RepeatCommand extends BracedCommand {
                 ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
             datum.originalValue = queue.getDefinitionObject(datum.valueName);
+            datum.slotTable = scriptEntry.internal.slotTable;
+            datum.valueSlot = ScriptQueue.slotFor(scriptEntry, datum.valueHolder);
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
-            queue.addDefinition(datum.valueHolder, new ElementTag(datum.index));
+            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, new ElementTag(datum.index));
         }
     }
 
@@ -180,7 +185,7 @@ public class RepeatCommand extends BracedCommand {
         if (owner.dbCallShouldDebug()) {
             Debug.echoDebug(owner, Debug.DebugElement.Header, "Repeat loop " + data.index);
         }
-        queue.addDefinition(data.valueHolder, new ElementTag(data.index));
+        queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, new ElementTag(data.index));
         return true;
     };
 }

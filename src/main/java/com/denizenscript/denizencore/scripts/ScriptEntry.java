@@ -17,6 +17,7 @@ import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.tags.ParseableTag;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
+import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.Deprecations;
 import com.denizenscript.denizencore.utilities.EnumHelper;
 import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
@@ -72,6 +73,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
          * so a volatile write here is what lets another thread read that value without seeing it half-made.
          */
         public volatile Object specialProcessedData = null;
+
+        public DefinitionSlots slotTable = null;
 
         public String originalLine = null;
 
@@ -134,6 +137,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             result.waitfor = waitfor;
             result.hasTags = hasTags;
             result.specialProcessedData = specialProcessedData;
+            result.slotTable = slotTable;
             result.originalLine = originalLine;
             result.lineNumber = lineNumber;
             result.brokenArgs = brokenArgs;
@@ -458,6 +462,11 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
     }
 
     public void setBracedSet(List<BracedCommand.BracedData> set) {
+        if (set != null && internal.slotTable != null) {
+            for (BracedCommand.BracedData data : set) {
+                SlotAllocator.allocate(data.value, internal.slotTable);
+            }
+        }
         internal.bracedSet = set;
     }
 

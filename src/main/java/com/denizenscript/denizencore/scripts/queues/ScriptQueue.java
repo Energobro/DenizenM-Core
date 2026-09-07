@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.CommandExecutor;
 import com.denizenscript.denizencore.tags.TagContext;
+import com.denizenscript.denizencore.tags.TagManager;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.*;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
@@ -452,6 +453,43 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         return definitions.toMap();
     }
 
+    public ObjectTag getDefinitionSlot(TagManager.ParseableTagPiece tag, StringHolder definition) {
+        DefinitionSlots table = definitions.boundTable();
+        if (table == null) {
+            return getDefinitionObject(definition);
+        }
+        TagManager.SlotBinding binding = tag.binding;
+        if (binding == null || binding.table != table) {
+            binding = new TagManager.SlotBinding(table, table.lookup(definition.low));
+            tag.binding = binding;
+        }
+        if (binding.slot == DefinitionSlots.NO_SLOT) {
+            return getDefinitionObject(definition);
+        }
+        return definitions.getSlot(table, binding.slot, definition);
+    }
+
+    public void addDefinitionSlot(DefinitionSlots table, int slot, StringHolder definition, ObjectTag value) {
+        if (table == null || slot == DefinitionSlots.NO_SLOT) {
+            addDefinition(definition, value);
+            return;
+        }
+        if (trackedDefinitionWrites != null) {
+            trackedDefinitionWrites.add(definition.str);
+        }
+        definitions.putSlot(table, slot, definition, value);
+    }
+
+    public static int slotFor(ScriptEntry owner, StringHolder definition) {
+        DefinitionSlots table = owner.internal.slotTable;
+        return table == null ? DefinitionSlots.NO_SLOT : table.lookup(definition.low);
+    }
+
+    public static int tableSizeFor(ScriptEntry owner) {
+        DefinitionSlots table = owner.internal.slotTable;
+        return table == null ? 0 : table.size();
+    }
+
     public final ScriptEntry getLastEntryExecuted() {
         return lastEntryExecuted;
     }
@@ -706,7 +744,17 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     public final void addEntries(List<ScriptEntry> entries) {
+        adoptSlots(entries);
         script_entries.addAll(entries);
+    }
+
+    private void adoptSlots(List<ScriptEntry> entries) {
+        if (!entries.isEmpty()) {
+            DefinitionSlots table = entries.get(0).internal.slotTable;
+            if (table != null) {
+                definitions.bindIfUnbound(table);
+            }
+        }
     }
 
     public final ListQueue getEntries() {
@@ -738,6 +786,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     public final void injectEntriesAtStart(List<ScriptEntry> entries) {
+        adoptSlots(entries);
         script_entries.addAllToStart(entries);
     }
 

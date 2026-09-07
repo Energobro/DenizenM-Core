@@ -8,6 +8,8 @@ import com.denizenscript.denizencore.objects.core.QueueTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.commands.Holdable;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
+import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
@@ -83,12 +85,11 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
     public static final Object REBUILT_EVERY_RUN = new Object();
 
     public static class CachedMap {
-
         public StringHolder key;
-
         public ElementTag definition;
-
         public MapTag template;
+        public int slot = DefinitionSlots.NO_SLOT;
+        public int resolvedAtSize = -1;
     }
 
     @Override
@@ -160,6 +161,14 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
         if (scriptEntry.dbCallShouldDebug()) {
             Debug.report(scriptEntry, getName(), new QueueTag(scriptEntry.getResidingQueue()), definition, value);
         }
-        scriptEntry.getResidingQueue().addDefinition(cached != null ? cached.key : StringHolder.ofLowered(CoreUtilities.toLowerCase(definition.asString())), value.duplicate());
+        if (cached == null) {
+            scriptEntry.getResidingQueue().addDefinition(StringHolder.ofLowered(CoreUtilities.toLowerCase(definition.asString())), value.duplicate());
+            return;
+        }
+        if (cached.slot == DefinitionSlots.NO_SLOT && cached.resolvedAtSize != ScriptQueue.tableSizeFor(scriptEntry)) {
+            cached.resolvedAtSize = ScriptQueue.tableSizeFor(scriptEntry);
+            cached.slot = ScriptQueue.slotFor(scriptEntry, cached.key);
+        }
+        scriptEntry.getResidingQueue().addDefinitionSlot(scriptEntry.internal.slotTable, cached.slot, cached.key, value.duplicate());
     }
 }

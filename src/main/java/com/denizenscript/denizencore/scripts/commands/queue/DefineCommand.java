@@ -18,6 +18,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.commands.Holdable;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
+import com.denizenscript.denizencore.utilities.DefinitionSlots;
 
 public class DefineCommand extends AbstractCommand implements Holdable {
 
@@ -121,16 +122,29 @@ public class DefineCommand extends AbstractCommand implements Holdable {
      * execution again - and for a non-Latin name that reads the Unicode tables per character. A name written as a tag
      * (<@link tag definition>, eg 'define <[which]> 1') really can differ per run, so only a tagless one is cached.
      */
-    public static StringHolder keyFor(ScriptEntry scriptEntry, String defName) {
-        if (scriptEntry.internal.specialProcessedData instanceof StringHolder) {
-            return (StringHolder) scriptEntry.internal.specialProcessedData;
+    public static class CachedKey {
+        public StringHolder key;
+        public int slot = DefinitionSlots.NO_SLOT;
+        public int resolvedAtSize = -1;
+    }
+
+    public static CachedKey keyFor(ScriptEntry scriptEntry, String defName) {
+        if (scriptEntry.internal.specialProcessedData instanceof CachedKey cached) {
+            if (cached.slot == DefinitionSlots.NO_SLOT && cached.resolvedAtSize != ScriptQueue.tableSizeFor(scriptEntry)) {
+                cached.resolvedAtSize = ScriptQueue.tableSizeFor(scriptEntry);
+                cached.slot = ScriptQueue.slotFor(scriptEntry, cached.key);
+            }
+            return cached;
         }
-        StringHolder key = StringHolder.ofLowered(CoreUtilities.toLowerCase(defName));
+        CachedKey cached = new CachedKey();
+        cached.key = StringHolder.ofLowered(CoreUtilities.toLowerCase(defName));
+        cached.resolvedAtSize = ScriptQueue.tableSizeFor(scriptEntry);
+        cached.slot = ScriptQueue.slotFor(scriptEntry, cached.key);
         ScriptEntry.InternalArgument[] args = scriptEntry.internal.arguments_to_use;
         if (args != null && args.length > 0 && args[0].value != null && !args[0].value.hasTag) {
-            scriptEntry.internal.specialProcessedData = key;
+            scriptEntry.internal.specialProcessedData = cached;
         }
-        return key;
+        return cached;
     }
 
     public static class DefinitionActionProvider extends ActionableDataProvider {
@@ -174,6 +188,7 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         if (scriptEntry.dbCallShouldDebug()) {
             Debug.report(scriptEntry, "DEFINE", new QueueTag(queue), definition, value);
         }
-        queue.addDefinition(keyFor(scriptEntry, defName), value.duplicate());
+        CachedKey cached = keyFor(scriptEntry, defName);
+        queue.addDefinitionSlot(scriptEntry.internal.slotTable, cached.slot, cached.key, value.duplicate());
     }
 }

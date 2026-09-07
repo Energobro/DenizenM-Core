@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.tags.TagContext;
 import com.denizenscript.denizencore.tags.TagManager;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
+import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.Deprecations;
 import com.denizenscript.denizencore.utilities.YamlConfiguration;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
@@ -353,6 +354,7 @@ public class ScriptContainer implements Debuggable {
             return null;
         }
         got = new ScriptEntrySet(entries);
+        SlotAllocator.allocate(entries, new DefinitionSlots());
         scriptsMap.put(path, got);
         return got;
     }
