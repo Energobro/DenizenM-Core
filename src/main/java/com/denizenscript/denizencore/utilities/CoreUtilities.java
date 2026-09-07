@@ -256,7 +256,11 @@ public class CoreUtilities {
 
     public static ObjectTag fixType(ObjectTag input, TagContext context) {
         if (input instanceof ElementTag element && !element.isPlainText) {
-            return ObjectFetcher.pickObjectFor(input.toString(), context);
+            String text = element.toString();
+            if (text.indexOf('@') == -1) {
+                return element;
+            }
+            return ObjectFetcher.pickObjectFor(text, context);
         }
         return input.refreshState();
     }
