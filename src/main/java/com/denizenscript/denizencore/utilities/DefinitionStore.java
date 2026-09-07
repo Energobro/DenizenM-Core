@@ -32,6 +32,15 @@ public class DefinitionStore {
         return map.getDeepObject(key);
     }
 
+    public ObjectTag getDeepObject(StringHolder[] path) {
+        return map.getDeepObject(path);
+    }
+
+    public void putDeepObject(StringHolder[] path, ObjectTag value) {
+        map.putDeepObject(path, value);
+        invalidate(path[0].low);
+    }
+
     public void putObject(StringHolder key, ObjectTag value) {
         map.putObject(key, value);
         invalidate(key.low);

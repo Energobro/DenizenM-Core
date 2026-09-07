@@ -387,7 +387,16 @@ public class TagManager {
         if (name == null || name.isEmpty() || CoreUtilities.contains(name, '<') || CoreUtilities.contains(name, '&')) {
             return;
         }
-        data.plainDefinitionKey = StringHolder.ofLowered(CoreUtilities.toLowerCase(name));
+        String lowered = CoreUtilities.toLowerCase(name);
+        data.plainDefinitionKey = StringHolder.ofLowered(lowered);
+        if (!lowered.startsWith("__") && CoreUtilities.contains(lowered, '.')) {
+            List<String> segments = CoreUtilities.split(lowered, '.');
+            StringHolder[] path = new StringHolder[segments.size()];
+            for (int i = 0; i < path.length; i++) {
+                path[i] = StringHolder.ofLowered(segments.get(i));
+            }
+            data.plainDefinitionPath = path;
+        }
     }
 
     public static ObjectTag readSingleTagObject(ParseableTagPiece tag, TagContext context) {
@@ -397,7 +406,9 @@ public class TagManager {
             if (provider != null) {
                 ObjectTag definition;
                 if (provider instanceof ScriptQueue queue) {
-                    definition = queue.getDefinitionSlot(tag, data.plainDefinitionKey);
+                    definition = data.plainDefinitionPath != null
+                            ? queue.getDefinitionDeep(data.plainDefinitionPath)
+                            : queue.getDefinitionSlot(tag, data.plainDefinitionKey);
                 }
                 else {
                     definition = provider.getDefinitionObject(data.plainDefinitionKey);

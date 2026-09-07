@@ -20,6 +20,8 @@ import com.denizenscript.denizencore.scripts.commands.Holdable;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.DefinitionSlots;
 
+import java.util.List;
+
 public class DefineCommand extends AbstractCommand implements Holdable {
 
     public DefineCommand() {
@@ -126,6 +128,7 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         public StringHolder key;
         public int slot = DefinitionSlots.NO_SLOT;
         public int resolvedAtSize = -1;
+        public StringHolder[] path;
     }
 
     public static CachedKey keyFor(ScriptEntry scriptEntry, String defName) {
@@ -137,7 +140,15 @@ public class DefineCommand extends AbstractCommand implements Holdable {
             return cached;
         }
         CachedKey cached = new CachedKey();
-        cached.key = StringHolder.ofLowered(CoreUtilities.toLowerCase(defName));
+        String lowered = CoreUtilities.toLowerCase(defName);
+        cached.key = StringHolder.ofLowered(lowered);
+        if (!lowered.startsWith("__") && CoreUtilities.contains(lowered, '.')) {
+            List<String> segments = CoreUtilities.split(lowered, '.');
+            cached.path = new StringHolder[segments.size()];
+            for (int i = 0; i < cached.path.length; i++) {
+                cached.path[i] = StringHolder.ofLowered(segments.get(i));
+            }
+        }
         cached.resolvedAtSize = ScriptQueue.tableSizeFor(scriptEntry);
         cached.slot = ScriptQueue.slotFor(scriptEntry, cached.key);
         ScriptEntry.InternalArgument[] args = scriptEntry.internal.arguments_to_use;
@@ -189,6 +200,10 @@ public class DefineCommand extends AbstractCommand implements Holdable {
             Debug.report(scriptEntry, "DEFINE", new QueueTag(queue), definition, value);
         }
         CachedKey cached = keyFor(scriptEntry, defName);
+        if (cached.path != null) {
+            queue.addDefinitionDeep(cached.path, value.duplicate());
+            return;
+        }
         queue.addDefinitionSlot(scriptEntry.internal.slotTable, cached.slot, cached.key, value.duplicate());
     }
 }

@@ -453,6 +453,17 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         return definitions.toMap();
     }
 
+    public ObjectTag getDefinitionDeep(StringHolder[] path) {
+        return definitions.getDeepObject(path);
+    }
+
+    public void addDefinitionDeep(StringHolder[] path, ObjectTag value) {
+        if (trackedDefinitionWrites != null) {
+            trackedDefinitionWrites.add(path[0].str);
+        }
+        definitions.putDeepObject(path, value);
+    }
+
     public ObjectTag getDefinitionSlot(TagManager.ParseableTagPiece tag, StringHolder definition) {
         DefinitionSlots table = definitions.boundTable();
         if (table == null) {

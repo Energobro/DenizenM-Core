@@ -263,6 +263,18 @@ public class MapTag implements ObjectTag {
         return current.getObject(subkeys.get(subkeys.size() - 1));
     }
 
+    public ObjectTag getDeepObject(StringHolder[] path) {
+        MapTag current = this;
+        for (int i = 0; i < path.length - 1; i++) {
+            ObjectTag subValue = current.getObject(path[i]);
+            if (!(subValue instanceof MapTag sub)) {
+                return null;
+            }
+            current = sub;
+        }
+        return current.getObject(path[path.length - 1]);
+    }
+
     public ObjectTag getObject(String key, Supplier<ObjectTag> defaultGetter) {
         ObjectTag object = getDeepObject(key);
         if (object == null) {
@@ -317,6 +329,25 @@ public class MapTag implements ObjectTag {
 
     public boolean containsKey(StringHolder key) {
         return map.containsKey(key);
+    }
+
+    public void putDeepObject(StringHolder[] path, ObjectTag value) {
+        MapTag current = this;
+        for (int i = 0; i < path.length - 1; i++) {
+            ObjectTag subValue = current.getObject(path[i]);
+            if (subValue instanceof MapTag sub) {
+                current = sub;
+            }
+            else {
+                if (value == null) {
+                    return;
+                }
+                MapTag fresh = new MapTag();
+                current.putObject(path[i], fresh);
+                current = fresh;
+            }
+        }
+        current.putObject(path[path.length - 1], value);
     }
 
     public void putDeepObject(String key, ObjectTag value) {

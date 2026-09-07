@@ -52,6 +52,8 @@ public class ReplaceableTagEvent {
 
         public StringHolder plainDefinitionKey = null;
 
+        public StringHolder[] plainDefinitionPath = null;
+
         public ObjectTag rawObject = null;
     }
 
