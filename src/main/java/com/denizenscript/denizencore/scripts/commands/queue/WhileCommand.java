@@ -60,7 +60,7 @@ public class WhileCommand extends BracedCommand {
         public int indexSlot = DefinitionSlots.NO_SLOT;
 
         public void reapplyAtEnd(ScriptQueue queue) {
-            queue.addDefinition("loop_index", originalIndexValue);
+            queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, originalIndexValue);
         }
     }
 

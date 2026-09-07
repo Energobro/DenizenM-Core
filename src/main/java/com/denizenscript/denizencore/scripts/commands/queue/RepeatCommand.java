@@ -82,7 +82,7 @@ public class RepeatCommand extends BracedCommand {
         public int valueSlot = DefinitionSlots.NO_SLOT;
 
         public void reapplyAtEnd(ScriptQueue queue) {
-            queue.addDefinition(valueName, originalValue);
+            queue.addDefinition(valueHolder, originalValue);
         }
     }
 

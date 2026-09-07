@@ -99,11 +99,11 @@ public class ForeachCommand extends BracedCommand {
         public ObjectTag originalValue, originalKeyValue, originalIndexValue;
 
         public void reapplyAtEnd(ScriptQueue queue) {
-            queue.addDefinition(valueName, originalValue);
+            queue.addDefinition(valueHolder, originalValue);
             if (keys != null) {
-                queue.addDefinition(keyName, originalKeyValue);
+                queue.addDefinition(keyHolder, originalKeyValue);
             }
-            queue.addDefinition("loop_index", originalIndexValue);
+            queue.addDefinition(ScriptQueue.LOOP_INDEX_KEY, originalIndexValue);
         }
     }
 
@@ -220,7 +220,7 @@ public class ForeachCommand extends BracedCommand {
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
             if (datum.keys != null) {
-                queue.addDefinition(datum.keyName, datum.keys.get(0));
+                queue.addDefinitionSlot(datum.slotTable, datum.keySlot, datum.keyHolder, new ElementTag(datum.keys.get(0)));
             }
             queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.list.getObject(0));
             queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, new ElementTag(1));
