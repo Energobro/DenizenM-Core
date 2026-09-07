@@ -6,6 +6,7 @@ import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.CommandExecutor;
+import com.denizenscript.denizencore.tags.Attribute;
 import com.denizenscript.denizencore.tags.TagContext;
 import com.denizenscript.denizencore.tags.TagManager;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
@@ -466,20 +467,37 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         definitions.putDeepObject(path, value);
     }
 
+    public static TagManager.SlotBinding bindingFor(DefinitionSlots table, TagManager.SlotBinding existing, StringHolder definition) {
+        if (existing != null && existing.table == table) {
+            return existing;
+        }
+        int slot = table.lookup(definition.low);
+        if (slot == DefinitionSlots.NO_SLOT) {
+            slot = table.assign(definition.low);
+        }
+        return new TagManager.SlotBinding(table, slot);
+    }
+
     public ObjectTag getDefinitionSlot(TagManager.ParseableTagPiece tag, StringHolder definition) {
         DefinitionSlots table = definitions.boundTable();
         if (table == null) {
             return getDefinitionObject(definition);
         }
-        TagManager.SlotBinding binding = tag.binding;
-        if (binding == null || binding.table != table) {
-            int slot = table.lookup(definition.low);
-            if (slot == DefinitionSlots.NO_SLOT) {
-                slot = table.assign(definition.low);
-            }
-            binding = new TagManager.SlotBinding(table, slot);
-            tag.binding = binding;
+        TagManager.SlotBinding binding = bindingFor(table, tag.binding, definition);
+        tag.binding = binding;
+        if (binding.slot == DefinitionSlots.NO_SLOT) {
+            return getDefinitionObject(definition);
         }
+        return definitions.getSlot(table, binding.slot, definition);
+    }
+
+    public ObjectTag getDefinitionSlot(Attribute.AttributeComponent component, StringHolder definition) {
+        DefinitionSlots table = definitions.boundTable();
+        if (table == null) {
+            return getDefinitionObject(definition);
+        }
+        TagManager.SlotBinding binding = bindingFor(table, component.definitionBinding, definition);
+        component.definitionBinding = binding;
         if (binding.slot == DefinitionSlots.NO_SLOT) {
             return getDefinitionObject(definition);
         }

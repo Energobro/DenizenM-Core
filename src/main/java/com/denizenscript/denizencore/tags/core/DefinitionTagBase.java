@@ -3,6 +3,8 @@ package com.denizenscript.denizencore.tags.core;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.tags.TagRunnable;
 import com.denizenscript.denizencore.objects.ObjectTag;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
+import com.denizenscript.denizencore.tags.Attribute;
 import com.denizenscript.denizencore.tags.TagManager;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
@@ -36,8 +38,18 @@ public class DefinitionTagBase {
                 attribute.echoError("No definitions are provided in this tag's context!");
                 return null;
             }
-            // asLowerString has already lowercased this, so the key does not need scanning again - see StringHolder.ofLowered.
-            ObjectTag def = definitionProvider.getDefinitionObject(StringHolder.ofLowered(defName.asLowerString()));
+            Attribute.AttributeComponent component = attribute.currentComponent();
+            StringHolder key = component == null ? null : component.definitionKey;
+            if (key == null) {
+                // asLowerString has already lowercased this, so the key does not need scanning again - see StringHolder.ofLowered.
+                key = StringHolder.ofLowered(defName.asLowerString());
+                if (component != null && component.paramParsed != null && !component.paramParsed.hasTag) {
+                    component.definitionKey = key;
+                }
+            }
+            ObjectTag def = component != null && component.definitionKey != null && definitionProvider instanceof ScriptQueue queue
+                    ? queue.getDefinitionSlot(component, key)
+                    : definitionProvider.getDefinitionObject(key);
             if (def == null) {
                 attribute.echoError("Invalid definition name '" + defName + "'.");
                 return null;

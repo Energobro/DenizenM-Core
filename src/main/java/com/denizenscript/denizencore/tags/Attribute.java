@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.utilities.DefinitionProvider;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
@@ -39,6 +40,10 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         public ParseableTag paramParsed;
 
         public ObjectTagProcessor.TagData<? extends ObjectTag, ? extends ObjectTag> data;
+
+        public StringHolder definitionKey;
+
+        public TagManager.SlotBinding definitionBinding;
 
         public ResolvedSubTag resolvedSubTag;
 
@@ -458,6 +463,10 @@ public class Attribute implements TagContext.ShowErrorsMethod {
             return null;
         }
         return contextObj.asType(dClass, context);
+    }
+
+    public final Attribute.AttributeComponent currentComponent() {
+        return fulfilled < attributes.length ? attributes[fulfilled] : null;
     }
 
     public final ObjectTag getParamObject() {
