@@ -182,28 +182,34 @@ public class ElementTag implements ObjectTag {
 
     public ElementTag(int integer) {
         this.prefix = "number";
-        this.source = this.lazyText = String.valueOf(integer);
+        Long boxed = Long.valueOf(integer);
+        this.source = boxed;
         this.isPlainText = true;
-        this.numberCache = Long.valueOf(integer);
+        this.numberCache = boxed;
     }
 
     public ElementTag(byte byt) {
         this.prefix = "number";
-        this.source = this.lazyText = String.valueOf(byt);
+        Long boxed = Long.valueOf(byt);
+        this.source = boxed;
         this.isPlainText = true;
+        this.numberCache = boxed;
     }
 
     public ElementTag(short shrt) {
         this.prefix = "number";
-        this.source = this.lazyText = String.valueOf(shrt);
+        Long boxed = Long.valueOf(shrt);
+        this.source = boxed;
         this.isPlainText = true;
+        this.numberCache = boxed;
     }
 
     public ElementTag(long lng) {
         this.prefix = "number";
-        this.source = this.lazyText = String.valueOf(lng);
+        Long boxed = Long.valueOf(lng);
+        this.source = boxed;
         this.isPlainText = true;
-        this.numberCache = lazyText.length() <= 18 ? (Object) Long.valueOf(lng) : (Object) Double.valueOf((double) lng);
+        this.numberCache = lng > -100000000000000000L && lng < 1000000000000000000L ? (Object) boxed : (Object) Double.valueOf((double) lng);
     }
 
     public ElementTag(BigDecimal bdl) {
@@ -265,6 +271,9 @@ public class ElementTag implements ObjectTag {
         }
         else if (src instanceof Float value) {
             result = CoreUtilities.doubleToString(value.floatValue());
+        }
+        else if (src instanceof Long value) {
+            result = Long.toString(value.longValue());
         }
         else {
             result = CoreUtilities.bigDecToString((BigDecimal) src);
