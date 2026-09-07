@@ -11,6 +11,7 @@ import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.BracedCommand;
 import com.denizenscript.denizencore.tags.TagContext;
+import com.denizenscript.denizencore.tags.ParseableTag;
 import com.denizenscript.denizencore.tags.TagManager;
 
 import java.util.ArrayList;
@@ -419,6 +420,25 @@ public class IfCommand extends BracedCommand {
 
     public static class ArgComparer {
 
+        public static class PreParsedArg {
+
+            final String raw;
+
+            final ParseableTag tag;
+
+            final ParseableTag tagNoBang;
+
+            PreParsedArg(String raw) {
+                this.raw = raw;
+                this.tag = TagManager.parseTextToTag(raw, CoreUtilities.errorButNoDebugContext);
+                this.tagNoBang = raw.startsWith("!") ? TagManager.parseTextToTag(raw.substring(1), CoreUtilities.errorButNoDebugContext) : null;
+            }
+        }
+
+        static Object preParse(Object arg) {
+            return arg instanceof String str ? new PreParsedArg(str) : arg;
+        }
+
         public static class ArgInternal {
 
             boolean negative;
@@ -439,6 +459,9 @@ public class IfCommand extends BracedCommand {
             if (arg instanceof String) {
                 return (String) arg;
             }
+            else if (arg instanceof PreParsedArg pre) {
+                return pre.raw;
+            }
             else if (arg instanceof ScriptEntry.InternalArgument) {
                 return ((ScriptEntry.InternalArgument) arg).fullOriginalRawValue;
             }
@@ -454,6 +477,9 @@ public class IfCommand extends BracedCommand {
         public static String procStringNoTag(Object arg) {
             if (arg instanceof String) {
                 return (String) arg;
+            }
+            else if (arg instanceof PreParsedArg pre) {
+                return pre.raw;
             }
             else if (arg instanceof ScriptEntry.InternalArgument) {
                 return ((ScriptEntry.InternalArgument) arg).fullOriginalRawValue;
@@ -498,6 +524,17 @@ public class IfCommand extends BracedCommand {
         }
 
         public static ArgInternal tagme(ScriptEntry scriptEntry, Object argObj, boolean canNegate) {
+            if (argObj instanceof PreParsedArg pre) {
+                ArgInternal toRet = new ArgInternal();
+                if (canNegate && pre.tagNoBang != null) {
+                    toRet.negative = true;
+                    toRet.value = pre.tagNoBang.parse(contextFor(scriptEntry));
+                }
+                else {
+                    toRet.value = pre.tag.parse(contextFor(scriptEntry));
+                }
+                return toRet;
+            }
             if (argObj instanceof String) {
                 return tagify(scriptEntry, (String) argObj, canNegate);
             }
@@ -522,6 +559,12 @@ public class IfCommand extends BracedCommand {
             else if (argObj instanceof Boolean) {
                 return (Boolean) argObj;
             }
+            else if (argObj instanceof PreParsedArg pre) {
+                if (canNegate && pre.tagNoBang != null) {
+                    return !pre.tagNoBang.parse(contextFor(scriptEntry)).isTruthy();
+                }
+                return pre.tag.parse(contextFor(scriptEntry)).isTruthy();
+            }
             else if (argObj instanceof ScriptEntry.InternalArgument internalArg && canUseParsed(internalArg, canNegate)) {
                 return internalArg.value.parse(contextFor(scriptEntry)).isTruthy();
             }
@@ -532,6 +575,9 @@ public class IfCommand extends BracedCommand {
         public static ObjectTag tagvalue(ScriptEntry scriptEntry, Object argObj) {
             if (argObj instanceof Condition) {
                 return new ElementTag(((Condition) argObj).evaluate(scriptEntry));
+            }
+            if (argObj instanceof PreParsedArg pre) {
+                return pre.tag.parse(contextFor(scriptEntry));
             }
             if (argObj instanceof ScriptEntry.InternalArgument internalArg && canUseParsed(internalArg, false)) {
                 return internalArg.value.parse(contextFor(scriptEntry));
@@ -552,7 +598,7 @@ public class IfCommand extends BracedCommand {
                 return scriptEntry -> false;
             }
             if (args.size() == 1) {
-                Object only = args.get(0);
+                Object only = preParse(args.get(0));
                 return scriptEntry -> tagbool(scriptEntry, only, true);
             }
             List crunched = null;
@@ -606,7 +652,7 @@ public class IfCommand extends BracedCommand {
                 args = crunched;
             }
             if (args.size() == 1) {
-                Object only = args.get(0);
+                Object only = preParse(args.get(0));
                 return scriptEntry -> tagbool(scriptEntry, only, true);
             }
             for (int i = 0; i < args.size(); i++) {
@@ -623,7 +669,7 @@ public class IfCommand extends BracedCommand {
             }
             if (args.size() == 2) {
                 if (CoreUtilities.toLowerCase(procStringNoTag(args.get(0))).equals("not")) {
-                    Object only = args.get(1);
+                    Object only = preParse(args.get(1));
                     return scriptEntry -> !tagbool(scriptEntry, only, false);
                 }
                 return scriptEntry -> false;
@@ -662,7 +708,7 @@ public class IfCommand extends BracedCommand {
                     return false;
                 };
             }
-            Object leftArg = args.get(0), rightArg = args.get(args.size() - 1);
+            Object leftArg = preParse(args.get(0)), rightArg = preParse(args.get(args.size() - 1));
             Comparable.Operator finalOperator = operator;
             boolean finalNegative = negative;
             return scriptEntry -> {
