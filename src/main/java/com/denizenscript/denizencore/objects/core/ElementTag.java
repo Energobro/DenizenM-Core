@@ -1971,7 +1971,7 @@ public class ElementTag implements ObjectTag {
                 return decimalOf(objectLong / secondLong);
             }
             try {
-                return new ElementTag(object.asBigDecimalRaw().divide(second.asBigDecimalRaw(), 64, RoundingMode.HALF_UP));
+                return new ElementTag(object.asBigDecimalRaw().divide(second.asBigDecimalRaw(), 20, RoundingMode.HALF_UP));
             }
             catch (Throwable e) {
                 return new ElementTag(object.asDouble() / second.asDouble());
