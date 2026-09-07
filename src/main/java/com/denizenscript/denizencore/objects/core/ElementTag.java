@@ -135,7 +135,9 @@ public class ElementTag implements ObjectTag {
         return object;
     }
 
-    private final String element;
+    private final Object source;
+
+    private String lazyText;
 
     private String prefix;
 
@@ -165,70 +167,79 @@ public class ElementTag implements ObjectTag {
             if (CoreConfiguration.debugVerbose) {
                 Debug.echoError("Element - Null construction!");
             }
-            this.element = "null";
+            this.source = this.lazyText = "null";
         }
         else {
-            this.element = string;
+            this.source = this.lazyText = string;
         }
     }
 
     public ElementTag(boolean bool) {
         this.prefix = "boolean";
-        this.element = String.valueOf(bool);
+        this.source = this.lazyText = String.valueOf(bool);
         this.isPlainText = true;
     }
 
     public ElementTag(int integer) {
         this.prefix = "number";
-        this.element = String.valueOf(integer);
+        this.source = this.lazyText = String.valueOf(integer);
         this.isPlainText = true;
         this.numberCache = Long.valueOf(integer);
     }
 
     public ElementTag(byte byt) {
         this.prefix = "number";
-        this.element = String.valueOf(byt);
+        this.source = this.lazyText = String.valueOf(byt);
         this.isPlainText = true;
     }
 
     public ElementTag(short shrt) {
         this.prefix = "number";
-        this.element = String.valueOf(shrt);
+        this.source = this.lazyText = String.valueOf(shrt);
         this.isPlainText = true;
     }
 
     public ElementTag(long lng) {
         this.prefix = "number";
-        this.element = String.valueOf(lng);
+        this.source = this.lazyText = String.valueOf(lng);
         this.isPlainText = true;
-        this.numberCache = element.length() <= 18 ? (Object) Long.valueOf(lng) : (Object) Double.valueOf((double) lng);
+        this.numberCache = lazyText.length() <= 18 ? (Object) Long.valueOf(lng) : (Object) Double.valueOf((double) lng);
     }
 
     public ElementTag(BigDecimal bdl) {
         this.prefix = "decimal";
-        this.element = CoreUtilities.bigDecToString(bdl);
+        this.source = bdl;
         this.isPlainText = true;
     }
 
     public ElementTag(double dbl) {
         this.prefix = "decimal";
-        this.element = CoreUtilities.doubleToString(dbl);
         this.isPlainText = true;
         if (Double.isNaN(dbl) || Double.isInfinite(dbl)) {
+            this.source = this.lazyText = CoreUtilities.doubleToString(dbl);
             this.numberCache = NOT_NUMERIC;
+            return;
         }
-        else if (element.length() <= 18 && (long) dbl == dbl) {
+        Double boxed = Double.valueOf(dbl);
+        this.source = boxed;
+        if ((long) dbl != dbl) {
+            this.numberCache = boxed;
+        }
+        else if (Math.abs(dbl) < 1e15) {
             this.numberCache = Long.valueOf((long) dbl);
         }
         else {
-            this.numberCache = Double.valueOf(dbl);
+            this.numberCache = text().length() <= 18 ? (Object) Long.valueOf((long) dbl) : (Object) boxed;
         }
     }
 
     public ElementTag(float flt) {
         this.prefix = "decimal";
-        this.element = CoreUtilities.doubleToString(flt);
+        this.source = Float.valueOf(flt);
         this.isPlainText = true;
+        if ((long) flt == flt && Math.abs(flt) < 1e15) {
+            this.numberCache = Long.valueOf((long) flt);
+        }
     }
 
     public ElementTag(String prefix, String string) {
@@ -236,6 +247,30 @@ public class ElementTag implements ObjectTag {
         if (prefix != null) {
             this.prefix = prefix;
         }
+    }
+
+    private String text() {
+        String result = lazyText;
+        return result != null ? result : materialise();
+    }
+
+    private String materialise() {
+        Object src = source;
+        String result;
+        if (src instanceof String str) {
+            result = str;
+        }
+        else if (src instanceof Double value) {
+            result = CoreUtilities.doubleToString(value.doubleValue());
+        }
+        else if (src instanceof Float value) {
+            result = CoreUtilities.doubleToString(value.floatValue());
+        }
+        else {
+            result = CoreUtilities.bigDecToString((BigDecimal) src);
+        }
+        lazyText = result;
+        return result;
     }
 
     static final BigDecimal max = new BigDecimal("10E1000");
@@ -264,11 +299,11 @@ public class ElementTag implements ObjectTag {
     public static AsciiMatcher percentageMatcher = new AsciiMatcher("%");
 
     public BigDecimal asBigDecimal() {
-        return getBD(percentageMatcher.trimToNonMatches(element));
+        return getBD(percentageMatcher.trimToNonMatches(text()));
     }
 
     public BigDecimal asBigDecimalRaw() {
-        return getBDRaw(percentageMatcher.trimToNonMatches(element));
+        return getBDRaw(percentageMatcher.trimToNonMatches(text()));
     }
 
     public static boolean isPlainLong(String text) {
@@ -307,7 +342,7 @@ public class ElementTag implements ObjectTag {
      * The element's numeric value: a {@link Long} when the text is what {@link #isPlainLong} accepts, a {@link Double} when it is any
      * other plain number, or {@link #NOT_NUMERIC} (by identity) when it is not a number at all.
      * <p>
-     * The text is final, so the answer never changes and the field is only ever written with a value derived from it - two threads
+     * The source is final, so the answer never changes and the field is only ever written with a value derived from it - two threads
      * racing here compute the same result, and only a reference is written, never a long or a double. Percentage syntax is deliberately
      * not handled: {@link #asDouble()} still parses that itself.
      */
@@ -318,11 +353,11 @@ public class ElementTag implements ObjectTag {
         }
         Object resolved = NOT_NUMERIC;
         try {
-            if (isPlainLong(element)) {
-                resolved = Long.valueOf(Long.parseLong(element));
+            if (isPlainLong(text())) {
+                resolved = Long.valueOf(Long.parseLong(text()));
             }
-            else if (ArgumentHelper.matchesDouble(element)) {
-                double parsed = Double.parseDouble(element);
+            else if (ArgumentHelper.matchesDouble(text())) {
+                double parsed = Double.parseDouble(text());
                 if (!Double.isNaN(parsed)) {
                     resolved = Double.valueOf(parsed);
                 }
@@ -344,11 +379,11 @@ public class ElementTag implements ObjectTag {
         if (cached != NOT_NUMERIC) {
             return ((Number) cached).doubleValue();
         }
-        return Double.parseDouble(percentageMatcher.trimToNonMatches(element));
+        return Double.parseDouble(percentageMatcher.trimToNonMatches(text()));
     }
 
     public float asFloat() {
-        return Float.parseFloat(percentageMatcher.trimToNonMatches(element));
+        return Float.parseFloat(percentageMatcher.trimToNonMatches(text()));
     }
 
     public int asInt() {
@@ -356,7 +391,7 @@ public class ElementTag implements ObjectTag {
     }
 
     public String cleanedForLong() {
-        String cleaned = percentageMatcher.trimToNonMatches(element);
+        String cleaned = percentageMatcher.trimToNonMatches(text());
         int dot = cleaned.indexOf('.');
         if (dot > 0) {
             cleaned = cleaned.substring(0, dot);
@@ -369,25 +404,25 @@ public class ElementTag implements ObjectTag {
             return Long.parseLong(cleanedForLong());
         }
         catch (NumberFormatException ex) {
-            Debug.echoError("'" + element + "' is not a valid integer!");
+            Debug.echoError("'" + text() + "' is not a valid integer!");
             return 0;
         }
     }
 
     public boolean asBoolean() {
-        return CoreUtilities.equalsIgnoreCase(element, "true");
+        return CoreUtilities.equalsIgnoreCase(text(), "true");
     }
 
     public String asString() {
-        return element;
+        return text();
     }
 
     public String asLowerString() {
-        return CoreUtilities.toLowerCase(element);
+        return CoreUtilities.toLowerCase(text());
     }
 
     public boolean isBoolean() {
-        return CoreUtilities.equalsIgnoreCase(element, "true") || CoreUtilities.equalsIgnoreCase(element, "false");
+        return CoreUtilities.equalsIgnoreCase(text(), "true") || CoreUtilities.equalsIgnoreCase(text(), "false");
     }
 
     public boolean isDouble() {
@@ -396,10 +431,10 @@ public class ElementTag implements ObjectTag {
 
     public boolean isFloat() {
         try {
-            if (!ArgumentHelper.matchesDouble(element)) {
+            if (!ArgumentHelper.matchesDouble(text())) {
                 return false;
             }
-            if (!Float.isNaN(Float.parseFloat(element))) {
+            if (!Float.isNaN(Float.parseFloat(text()))) {
                 return true;
             }
         }
@@ -410,7 +445,7 @@ public class ElementTag implements ObjectTag {
 
     public boolean isInt() {
         try {
-            return ArgumentHelper.matchesInteger(element);
+            return ArgumentHelper.matchesInteger(text());
         }
         catch (Exception e) {
         }
@@ -418,11 +453,11 @@ public class ElementTag implements ObjectTag {
     }
 
     public boolean isString() {
-        return (element != null && !element.isEmpty());
+        return (text() != null && !text().isEmpty());
     }
 
     public boolean matchesType(Class<? extends ObjectTag> dClass) {
-        return ObjectFetcher.checkMatch(dClass, element);
+        return ObjectFetcher.checkMatch(dClass, text());
     }
 
     @Override
@@ -448,7 +483,7 @@ public class ElementTag implements ObjectTag {
     }
 
     public boolean matchesEnum(Class<?> clazz) {
-        return EnumHelper.get(clazz).valuesMapLower.containsKey(EnumHelper.cleanKey(element));
+        return EnumHelper.get(clazz).valuesMapLower.containsKey(EnumHelper.cleanKey(text()));
     }
 
     public static <T> T asEnum(Class<T> clazz, String value) {
@@ -456,7 +491,7 @@ public class ElementTag implements ObjectTag {
     }
 
     public <T> T asEnum(Class<T> clazz) {
-        return (T) EnumHelper.get(clazz).valuesMapLower.get(EnumHelper.cleanKey(element));
+        return (T) EnumHelper.get(clazz).valuesMapLower.get(EnumHelper.cleanKey(text()));
     }
 
     @Override
@@ -472,15 +507,15 @@ public class ElementTag implements ObjectTag {
 
     @Override
     public String identify() {
-        return element;
+        return text();
     }
 
     @Override
     public String savable() {
-        if (element.indexOf('@') == -1) {
-            return element;
+        if (text().indexOf('@') == -1) {
+            return text();
         }
-        return "el@" + element;
+        return "el@" + text();
     }
 
     @Override
@@ -495,7 +530,7 @@ public class ElementTag implements ObjectTag {
 
     @Override
     public Object getJavaObject() {
-        return element;
+        return text();
     }
 
     @Override
@@ -505,10 +540,10 @@ public class ElementTag implements ObjectTag {
 
     @Override
     public boolean isTruthy() {
-        if (element.equals("") || CoreUtilities.equalsIgnoreCase(element, "null") || CoreUtilities.equalsIgnoreCase(element, "false")) {
+        if (text().equals("") || CoreUtilities.equalsIgnoreCase(text(), "null") || CoreUtilities.equalsIgnoreCase(text(), "false")) {
             return false;
         }
-        if (ArgumentHelper.matchesDouble(element)) {
+        if (ArgumentHelper.matchesDouble(text())) {
             try {
                 if (asDouble() == 0) {
                     return false;
@@ -611,11 +646,11 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element is an integer number (a number without a decimal point), within the limits of a Java "long" (64-bit signed integer).
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "is_integer", (attribute, object) -> {
-            if (!ArgumentHelper.matchesInteger(object.element)) {
+            if (!ArgumentHelper.matchesInteger(object.text())) {
                 return new ElementTag(false);
             }
             try {
-                Long.parseLong(object.element);
+                Long.parseLong(object.text());
                 return new ElementTag(true);
             }
             catch (NumberFormatException ex) {
@@ -631,7 +666,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element is a valid decimal number (the decimal point is optional).
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "is_decimal", (attribute, object) -> {
-            if (!ArgumentHelper.matchesDouble(object.element)) {
+            if (!ArgumentHelper.matchesDouble(object.text())) {
                 return new ElementTag(false);
             }
             try {
@@ -650,7 +685,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element is an odd-valued decimal number. Returns 'false' for non-numbers.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "is_odd", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             return new ElementTag(ArgumentHelper.matchesDouble(element) && (object.asBigDecimal().longValue() % 2) != 0);
         });
 
@@ -662,7 +697,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element is an even-valued decimal number. Returns 'false' for non-numbers.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "is_even", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             return new ElementTag(ArgumentHelper.matchesDouble(element) && (object.asBigDecimal().longValue() % 2) == 0);
         });
 
@@ -687,7 +722,7 @@ public class ElementTag implements ObjectTag {
         // 'true', 't', or '1' become 'true', anything else becomes 'false'.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "as_boolean", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             return new ElementTag(element.equalsIgnoreCase("true")
                     || element.equalsIgnoreCase("t")
                     || element.equalsIgnoreCase("1"));
@@ -702,7 +737,7 @@ public class ElementTag implements ObjectTag {
         // Essentially an error-check-in-a-tag. Produces no functional output change in most cases.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "as_decimal", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             try {
                 return new ElementTag(Double.parseDouble(element));
             }
@@ -730,7 +765,7 @@ public class ElementTag implements ObjectTag {
             }
             catch (NumberFormatException e) {
                 if (!attribute.hasAlternative()) {
-                    attribute.echoError("'" + object.element + "' is not a valid decimal number.");
+                    attribute.echoError("'" + object.text() + "' is not a valid decimal number.");
                 }
                 return null;
             }
@@ -744,7 +779,7 @@ public class ElementTag implements ObjectTag {
         // Returns the element as a number with two decimal places.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "as_money", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             try {
                 DecimalFormat d = new DecimalFormat("0.00", CoreUtilities.decimalFormatSymbols);
                 return new ElementTag(d.format(Double.valueOf(element)));
@@ -767,7 +802,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ListTag.class, "as_list", (attribute, object) -> {
             Deprecations.asXTags.warn(attribute.context);
-            String element = object.element;
+            String element = object.text();
             return handleNull(element, ListTag.valueOf(element, attribute.context), "ListTag", attribute.hasAlternative());
         }, "aslist");
 
@@ -781,7 +816,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(MapTag.class, "as_map", (attribute, object) -> {
             Deprecations.asXTags.warn(attribute.context);
-            String element = object.element;
+            String element = object.text();
             return handleNull(element, MapTag.valueOf(element, attribute.context), "MapTag", attribute.hasAlternative());
         });
 
@@ -795,7 +830,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerTag(CustomObjectTag.class, "as_custom", (attribute, object) -> {
             Deprecations.asXTags.warn(attribute.context);
-            String element = object.element;
+            String element = object.text();
             return handleNull(element, CustomObjectTag.valueOf(element, attribute.context), "Custom", attribute.hasAlternative());
         }, "ascustom");
 
@@ -809,7 +844,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ScriptTag.class, "as_script", (attribute, object) -> {
             Deprecations.asXTags.warn(attribute.context);
-            String element = object.element;
+            String element = object.text();
             return handleNull(element, ScriptTag.valueOf(element, attribute.context), "ScriptTag", attribute.hasAlternative());
         }, "asscript");
 
@@ -823,7 +858,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerTag(QueueTag.class, "as_queue", (attribute, object) -> {
             Deprecations.asXTags.warn(attribute.context);
-            String element = object.element;
+            String element = object.text();
             return handleNull(element, QueueTag.valueOf(element, attribute.context), "QueueTag", attribute.hasAlternative());
         }, "asqueue");
 
@@ -837,7 +872,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(DurationTag.class, "as_duration", (attribute, object) -> {
             Deprecations.asXTags.warn(attribute.context);
-            String element = object.element;
+            String element = object.text();
             return handleNull(element, DurationTag.valueOf(element, attribute.context), "DurationTag", attribute.hasAlternative());
         }, "asduration");
 
@@ -851,7 +886,7 @@ public class ElementTag implements ObjectTag {
         // See <@link language Escaping System>.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "escaped", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             return new ElementTag(EscapeTagUtil.escape(element));
         });
 
@@ -864,10 +899,10 @@ public class ElementTag implements ObjectTag {
         // -->
         AsciiMatcher htmlEscapable = new AsciiMatcher("&<>'\"");
         tagProcessor.registerStaticTag(ElementTag.class, "html_escaped", (attribute, object) -> {
-            if (!htmlEscapable.containsAnyMatch(object.element)) {
+            if (!htmlEscapable.containsAnyMatch(object.text())) {
                 return object;
             }
-            return new ElementTag(object.element.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;"));
+            return new ElementTag(object.text().replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\"", "&quot;").replace("'", "&apos;"));
 
         });
 
@@ -879,7 +914,7 @@ public class ElementTag implements ObjectTag {
         // Returns the element, escaped for safe use in SQL.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "sql_escaped", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             return new ElementTag(SQLEscaper.escapeSQL(element));
         });
 
@@ -893,7 +928,7 @@ public class ElementTag implements ObjectTag {
         // See <@link language Escaping System>.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "unescaped", (attribute, object) -> {
-            String element = object.element;
+            String element = object.text();
             return new ElementTag(EscapeTagUtil.unEscape(element));
         });
 
@@ -907,7 +942,7 @@ public class ElementTag implements ObjectTag {
         // YOU KNOW WHAT YOU ARE DOING. USE AT YOUR OWN RISK.
         // -->
         tagProcessor.registerTag(ObjectTag.class, "parsed", (attribute, object) -> {
-            return TagManager.tagObject(object.element, attribute.context);
+            return TagManager.tagObject(object.text(), attribute.context);
         });
 
         /////////////////////
@@ -933,7 +968,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element contains any of a list of specified elements, case sensitive.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ListTag.class, "contains_any_case_sensitive_text", (attribute, object, list) -> {
-            String element = object.element;
+            String element = object.text();
             for (String value : list) {
                 if (element.contains(value)) {
                     return new ElementTag(true);
@@ -1016,7 +1051,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element contains all of the specified elements, case sensitive.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ListTag.class, "contains_all_case_sensitive_text", (attribute, object, list) -> {
-            String element = object.element;
+            String element = object.text();
             for (String value : list) {
                 if (!element.contains(value)) {
                     return new ElementTag(false);
@@ -1034,7 +1069,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element ends with a specified element.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "ends_with", (attribute, object, compare) -> {
-            return new ElementTag(CoreUtilities.toLowerCase(object.element).
+            return new ElementTag(CoreUtilities.toLowerCase(object.text()).
                     endsWith(compare.asLowerString()));
         }, "endswith");
 
@@ -1046,7 +1081,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element matches another element, case-sensitive.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "equals_case_sensitive", (attribute, object, compare) -> {
-            return new ElementTag(object.element.equals(compare.asString()));
+            return new ElementTag(object.text().equals(compare.asString()));
         }, "equals_with_case");
 
         // <--[tag]
@@ -1057,7 +1092,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element matches a regex input.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "regex_matches", (attribute, object, regex) -> {
-            return new ElementTag(object.element.matches(regex.asString()));
+            return new ElementTag(object.text().matches(regex.asString()));
         }, "matches");
 
         // <--[tag]
@@ -1074,7 +1109,7 @@ public class ElementTag implements ObjectTag {
                 return null;
             }
             String regex = attribute.getParam();
-            Matcher m = Pattern.compile(regex).matcher(object.element);
+            Matcher m = Pattern.compile(regex).matcher(object.text());
             if (!m.matches()) {
                 return null;
             }
@@ -1114,7 +1149,7 @@ public class ElementTag implements ObjectTag {
         // Returns the length of the element.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "length", (attribute, object) -> {
-            return new ElementTag(object.element.length());
+            return new ElementTag(object.text().length());
         });
 
         // <--[tag]
@@ -1172,7 +1207,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element and the second element are true and false (exclusive or).
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "xor", (attribute, object, compare) -> {
-            return new ElementTag(object.element.equalsIgnoreCase("true") != compare.asString().equalsIgnoreCase("true"));
+            return new ElementTag(object.text().equalsIgnoreCase("true") != compare.asString().equalsIgnoreCase("true"));
         });
 
         // <--[tag]
@@ -1183,7 +1218,7 @@ public class ElementTag implements ObjectTag {
         // Returns whether the element starts with a specified element.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "starts_with", (attribute, object, compare) -> {
-            return new ElementTag(CoreUtilities.toLowerCase(object.element).startsWith(compare.asLowerString()));
+            return new ElementTag(CoreUtilities.toLowerCase(object.text()).startsWith(compare.asLowerString()));
         }, "startswith");
 
         // <--[tag]
@@ -1195,7 +1230,7 @@ public class ElementTag implements ObjectTag {
         // Returns 0 if the element never occurs within the element.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "index_of", (attribute, object, compare) -> {
-            return new ElementTag(CoreUtilities.toLowerCase(object.element)
+            return new ElementTag(CoreUtilities.toLowerCase(object.text())
                     .indexOf(compare.asLowerString()) + 1);
         });
 
@@ -1208,7 +1243,7 @@ public class ElementTag implements ObjectTag {
         // Returns 0 if the element never occurs within the element.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "last_index_of", (attribute, object, compare) -> {
-            return new ElementTag(CoreUtilities.toLowerCase(object.element)
+            return new ElementTag(CoreUtilities.toLowerCase(object.text())
                     .lastIndexOf(compare.asLowerString()) + 1);
         });
 
@@ -1227,7 +1262,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "char_at", (attribute, object, indexText) -> {
             int index = indexText.asInt();
-            String element = object.element;
+            String element = object.text();
             if (Math.abs(index) > element.length() || index == 0) {
                 return null;
             }
@@ -1252,9 +1287,9 @@ public class ElementTag implements ObjectTag {
             if (repeatTimes <= 0) {
                 return new ElementTag("");
             }
-            StringBuilder result = new StringBuilder(object.element.length() * repeatTimes);
+            StringBuilder result = new StringBuilder(object.text().length() * repeatTimes);
             for (int i = 0; i < repeatTimes; i++) {
-                result.append(object.element);
+                result.append(object.text());
             }
             return new ElementTag(result.toString());
         });
@@ -1268,9 +1303,9 @@ public class ElementTag implements ObjectTag {
         // For example: abcabc .after_last[b] returns c.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "after_last", (attribute, object, delimiter) -> {
-            if (CoreUtilities.toLowerCase(object.element).contains(delimiter.asLowerString())) {
-                return new ElementTag(object.element.substring
-                        (CoreUtilities.toLowerCase(object.element).lastIndexOf(delimiter.asLowerString()) + delimiter.asString().length()));
+            if (CoreUtilities.toLowerCase(object.text()).contains(delimiter.asLowerString())) {
+                return new ElementTag(object.text().substring
+                        (CoreUtilities.toLowerCase(object.text()).lastIndexOf(delimiter.asLowerString()) + delimiter.asString().length()));
             }
             else {
                 return new ElementTag("");
@@ -1286,9 +1321,9 @@ public class ElementTag implements ObjectTag {
         // For example: HelloWorld .after[Hello] returns World.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "after", (attribute, object, delimiter) -> {
-            if (CoreUtilities.toLowerCase(object.element).contains(delimiter.asLowerString())) {
-                return new ElementTag(object.element.substring
-                        (CoreUtilities.toLowerCase(object.element).indexOf(delimiter.asLowerString()) + delimiter.asString().length()));
+            if (CoreUtilities.toLowerCase(object.text()).contains(delimiter.asLowerString())) {
+                return new ElementTag(object.text().substring
+                        (CoreUtilities.toLowerCase(object.text()).indexOf(delimiter.asLowerString()) + delimiter.asString().length()));
             }
             else {
                 return new ElementTag("");
@@ -1304,12 +1339,12 @@ public class ElementTag implements ObjectTag {
         // For example: abcabc .before_last[b] returns abca.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "before_last", (attribute, object, delimiter) -> {
-            if (CoreUtilities.toLowerCase(object.element).contains(delimiter.asLowerString())) {
-                return new ElementTag(object.element.substring
-                        (0, CoreUtilities.toLowerCase(object.element).lastIndexOf(delimiter.asLowerString())));
+            if (CoreUtilities.toLowerCase(object.text()).contains(delimiter.asLowerString())) {
+                return new ElementTag(object.text().substring
+                        (0, CoreUtilities.toLowerCase(object.text()).lastIndexOf(delimiter.asLowerString())));
             }
             else {
-                return new ElementTag(object.element);
+                return new ElementTag(object.text());
             }
         });
 
@@ -1322,12 +1357,12 @@ public class ElementTag implements ObjectTag {
         // For example: abcd .before[c] returns ab.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "before", (attribute, object, delimiter) -> {
-            if (CoreUtilities.toLowerCase(object.element).contains(delimiter.asLowerString())) {
-                return new ElementTag(object.element.substring
-                        (0, CoreUtilities.toLowerCase(object.element).indexOf(delimiter.asLowerString())));
+            if (CoreUtilities.toLowerCase(object.text()).contains(delimiter.asLowerString())) {
+                return new ElementTag(object.text().substring
+                        (0, CoreUtilities.toLowerCase(object.text()).indexOf(delimiter.asLowerString())));
             }
             else {
-                return new ElementTag(object.element);
+                return new ElementTag(object.text());
             }
         });
 
@@ -1366,13 +1401,13 @@ public class ElementTag implements ObjectTag {
                 }
             }
             if (replace.startsWith("regex:")) {
-                return new ElementTag(object.element.replaceAll(replace.substring("regex:".length()), replacement));
+                return new ElementTag(object.text().replaceAll(replace.substring("regex:".length()), replacement));
             }
             if (replace.startsWith("firstregex:")) {
-                return new ElementTag(object.element.replaceFirst(replace.substring("firstregex:".length()), replacement));
+                return new ElementTag(object.text().replaceFirst(replace.substring("firstregex:".length()), replacement));
             }
             else {
-                return new ElementTag(object.element.replaceAll("(?i)" + Pattern.quote(replace), Matcher.quoteReplacement(replacement)));
+                return new ElementTag(object.text().replaceAll("(?i)" + Pattern.quote(replace), Matcher.quoteReplacement(replacement)));
             }
         });
         tagProcessor.registerFutureTagDeprecation("replace_text", "replace");
@@ -1394,15 +1429,15 @@ public class ElementTag implements ObjectTag {
                     DecimalFormat format = new DecimalFormat(attribute.getParam(), CoreUtilities.decimalFormatSymbols);
                     return new ElementTag(format.format(object.asBigDecimal()));
                 }
-                int decimal = object.element.indexOf('.');
+                int decimal = object.text().indexOf('.');
                 String shortelement;
                 String afterdecimal;
                 if (decimal != -1) {
-                    shortelement = object.element.substring(0, decimal);
-                    afterdecimal = object.element.substring(decimal);
+                    shortelement = object.text().substring(0, decimal);
+                    afterdecimal = object.text().substring(decimal);
                 }
                 else {
-                    shortelement = object.element;
+                    shortelement = object.text();
                     afterdecimal = "";
                 }
                 String intform = Long.valueOf(shortelement.replace("%", "")).toString();
@@ -1430,9 +1465,9 @@ public class ElementTag implements ObjectTag {
         // Returns a ListTag of each letter in the element.
         // -->
         tagProcessor.registerStaticTag(ListTag.class, "to_list", (attribute, object) -> {
-            ListTag list = new ListTag(object.element.length());
-            for (int i = 0; i < object.element.length(); i++) {
-                list.addObject(new ElementTag(String.valueOf(object.element.charAt(i)), true));
+            ListTag list = new ListTag(object.text().length());
+            for (int i = 0; i < object.text().length(); i++) {
+                list.addObject(new ElementTag(String.valueOf(object.text().charAt(i)), true));
             }
             return list;
         });
@@ -1445,7 +1480,7 @@ public class ElementTag implements ObjectTag {
         // Returns the value of an element minus any leading or trailing whitespace.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "trim", (attribute, object) -> {
-            return new ElementTag(object.element.trim());
+            return new ElementTag(object.text().trim());
         });
 
         // <--[tag]
@@ -1459,7 +1494,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "split_lines", (attribute, object, countText) -> {
             int characterCount = countText.asInt();
-            return new ElementTag(CoreUtilities.splitLinesByCharacterCount(object.element, characterCount));
+            return new ElementTag(CoreUtilities.splitLinesByCharacterCount(object.text(), characterCount));
         });
 
         // <--[tag]
@@ -1471,7 +1506,7 @@ public class ElementTag implements ObjectTag {
         // Numbers and symbols will return false.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "is_uppercase", (attribute, object) -> {
-            for (char c : object.element.toCharArray()) {
+            for (char c : object.text().toCharArray()) {
                 if (!Character.isUpperCase(c)) {
                     return new ElementTag(false);
                 }
@@ -1488,7 +1523,7 @@ public class ElementTag implements ObjectTag {
         // Numbers and symbols will return false.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "is_lowercase", (attribute, object) -> {
-            for (char c : object.element.toCharArray()) {
+            for (char c : object.text().toCharArray()) {
                 if (!Character.isLowerCase(c)) {
                     return new ElementTag(false);
                 }
@@ -1505,7 +1540,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "to_uppercase", (attribute, object) -> {
             // Intentionally do not use CoreUtilities here as users may expect multi-language compat.
-            return new ElementTag(object.element.toUpperCase());
+            return new ElementTag(object.text().toUpperCase());
         }, "upper");
 
         // <--[tag]
@@ -1517,7 +1552,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "to_lowercase", (attribute, object) -> {
             // Intentionally do not use CoreUtilities here as users may expect multi-language compat.
-            return new ElementTag(object.element.toLowerCase());
+            return new ElementTag(object.text().toLowerCase());
         }, "lower");
 
         // <--[tag]
@@ -1528,12 +1563,12 @@ public class ElementTag implements ObjectTag {
         // Returns The Value Of An ElementTag In Title Case (The First Letter Of Each Word Is Capitalized, Based On Spaces).
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "to_titlecase", (attribute, object) -> {
-            if (object.element.isEmpty()) {
+            if (object.text().isEmpty()) {
                 return new ElementTag("");
             }
-            StringBuilder titleCase = new StringBuilder(object.element.length());
+            StringBuilder titleCase = new StringBuilder(object.text().length());
             // Intentionally do not use CoreUtilities here as users may expect multi-language compat.
-            List<String> words = CoreUtilities.split(object.element, ' ');
+            List<String> words = CoreUtilities.split(object.text(), ' ');
             for (int i = 0; i < words.size(); i++) {
                 String word = words.get(i);
                 if (!word.isEmpty()) {
@@ -1555,10 +1590,10 @@ public class ElementTag implements ObjectTag {
         // Returns the value in sentence case (the first letter capitalized, the rest lowercase).
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "to_sentence_case", (attribute, object) -> {
-            if (object.element.length() == 0) {
+            if (object.text().length() == 0) {
                 return new ElementTag("");
             }
-            return new ElementTag(Character.toUpperCase(object.element.charAt(0)) + object.element.substring(1).toLowerCase());
+            return new ElementTag(Character.toUpperCase(object.text().charAt(0)) + object.text().substring(1).toLowerCase());
         });
 
         // <--[tag]
@@ -1591,7 +1626,7 @@ public class ElementTag implements ObjectTag {
         // For example: <element[MCLXIX].from_roman_numerals> returns 1169.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "from_roman_numerals", (attribute, object) -> {
-            int result = RomanNumerals.romanToArabic(object.element);
+            int result = RomanNumerals.romanToArabic(object.text());
             if (result == -1) {
                 attribute.echoError("Invalid roman numeral string!");
                 return null;
@@ -1617,21 +1652,21 @@ public class ElementTag implements ObjectTag {
                 ending_index = new ElementTag(split[1]).asInt();
             }
             else {
-                ending_index = object.element.length();
+                ending_index = object.text().length();
             }
             if (beginning_index < 0) {
                 beginning_index = 0;
             }
-            if (beginning_index > object.element.length()) {
-                beginning_index = object.element.length();
+            if (beginning_index > object.text().length()) {
+                beginning_index = object.text().length();
             }
-            if (ending_index > object.element.length()) {
-                ending_index = object.element.length();
+            if (ending_index > object.text().length()) {
+                ending_index = object.text().length();
             }
             if (ending_index < beginning_index) {
                 ending_index = beginning_index;
             }
-            return new ElementTag(object.element.substring(beginning_index, ending_index));
+            return new ElementTag(object.text().substring(beginning_index, ending_index));
         }, "substr");
 
         // <--[tag]
@@ -1643,7 +1678,7 @@ public class ElementTag implements ObjectTag {
         // That is, split by spaces but respecting the use of "quotes" to contain spaces within a single argument.
         // -->
         tagProcessor.registerStaticTag(ListTag.class, "split_args", (attribute, object) -> {
-            return new ListTag(Arrays.asList(ArgumentHelper.buildArgs(object.element, false)));
+            return new ListTag(Arrays.asList(ArgumentHelper.buildArgs(object.text(), false)));
         });
 
         // <--[tag]
@@ -1679,10 +1714,10 @@ public class ElementTag implements ObjectTag {
             if (attribute.startsWith("limit", 2)) {
                 int limit = (attribute.hasContext(2) ? attribute.getIntContext(2) : 1);
                 attribute.fulfill(1);
-                split = object.element.split(split_string, limit);
+                split = object.text().split(split_string, limit);
             }
             else {
-                split = object.element.split(split_string);
+                split = object.text().split(split_string);
             }
             return new ListTag(Arrays.asList(split));
         });
@@ -1711,11 +1746,11 @@ public class ElementTag implements ObjectTag {
                 attribute.fulfill(1);
             }
             StringBuilder padded = new StringBuilder();
-            length -= object.element.length();
+            length -= object.text().length();
             while (padded.length() < length) {
                 padded.append(with);
             }
-            padded.append(object.element);
+            padded.append(object.text());
             return new ElementTag(padded.toString());
         });
 
@@ -1741,7 +1776,7 @@ public class ElementTag implements ObjectTag {
                 with = String.valueOf(attribute.getContext(2).charAt(0));
                 attribute.fulfill(1);
             }
-            StringBuilder padded = new StringBuilder(object.element);
+            StringBuilder padded = new StringBuilder(object.text());
             while (padded.length() < length) {
                 padded.append(with);
             }
@@ -2423,11 +2458,11 @@ public class ElementTag implements ObjectTag {
         // Consider instead <@link tag BinaryTag.decode_integer>
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "hex_to_number", (attribute, object) -> {
-            if (!ArgumentHelper.HEX_MATCHER.isOnlyMatches(object.element)) {
+            if (!ArgumentHelper.HEX_MATCHER.isOnlyMatches(object.text())) {
                 attribute.echoError("Element '" + object + "' is not a valid hexadecimal number!");
                 return null;
             }
-            return new ElementTag(Long.parseLong(object.element, 16));
+            return new ElementTag(Long.parseLong(object.text(), 16));
         });
 
         // <--[tag]
@@ -2455,7 +2490,7 @@ public class ElementTag implements ObjectTag {
         // Equivalent to using <@link tag ElementTag.utf8_encode> and then <@link tag BinaryTag.to_base64>.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "base64_encode", (attribute, object) -> {
-            String encoded = Base64.getEncoder().encodeToString(object.element.getBytes(StandardCharsets.UTF_8));
+            String encoded = Base64.getEncoder().encodeToString(object.text().getBytes(StandardCharsets.UTF_8));
             return new ElementTag(encoded);
         });
 
@@ -2468,7 +2503,7 @@ public class ElementTag implements ObjectTag {
         // Equivalent to using <@link tag ElementTag.base64_to_binary> and then <@link tag BinaryTag.utf8_decode>.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "base64_decode", (attribute, object) -> {
-            String decoded = new String(Base64.getDecoder().decode(object.element));
+            String decoded = new String(Base64.getDecoder().decode(object.text()));
             return new ElementTag(decoded);
         });
 
@@ -2487,7 +2522,7 @@ public class ElementTag implements ObjectTag {
         //     - narrate "Everything works!"
         // -->
         tagProcessor.registerStaticTag(BinaryTag.class, "base64_to_binary", (attribute, object) -> {
-            return new BinaryTag(Base64.getDecoder().decode(object.element));
+            return new BinaryTag(Base64.getDecoder().decode(object.text()));
         });
 
         // <--[tag]
@@ -2502,7 +2537,7 @@ public class ElementTag implements ObjectTag {
         // - narrate "<element[HELLO WORLD].utf8_encode.to_hex>"
         // -->
         tagProcessor.registerStaticTag(BinaryTag.class, "utf8_encode", (attribute, object) -> {
-            return new BinaryTag(object.element.getBytes(StandardCharsets.UTF_8));
+            return new BinaryTag(object.text().getBytes(StandardCharsets.UTF_8));
         });
 
         // <--[tag]
@@ -2520,7 +2555,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(BinaryTag.class, ElementTag.class, "text_encode", (attribute, object, encoding) -> {
             try {
-                return new BinaryTag(object.element.getBytes(encoding.asString()));
+                return new BinaryTag(object.text().getBytes(encoding.asString()));
             }
             catch (UnsupportedEncodingException ex) {
                 attribute.echoError("Invalid encoding '" + encoding + "'");
@@ -2538,7 +2573,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "hex_encode", (attribute, object) -> {
             Deprecations.prebinaryTags.warn(attribute.context);
-            String encoded = CoreUtilities.hexEncode(object.element.getBytes());
+            String encoded = CoreUtilities.hexEncode(object.text().getBytes());
             return new ElementTag(encoded);
         });
 
@@ -2552,7 +2587,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "hex_decode", (attribute, object) -> {
             Deprecations.prebinaryTags.warn(attribute.context);
-            String decoded = new String(CoreUtilities.hexDecode(object.element));
+            String decoded = new String(CoreUtilities.hexDecode(object.text()));
             return new ElementTag(decoded);
         });
 
@@ -2565,7 +2600,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "url_encode", (attribute, object) -> {
             try {
-                String encoded = URLEncoder.encode(object.element, "UTF-8");
+                String encoded = URLEncoder.encode(object.text(), "UTF-8");
                 return new ElementTag(encoded);
             }
             catch (Exception e) {
@@ -2583,7 +2618,7 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, "url_decode", (attribute, object) -> {
             try {
-                String decoded = URLDecoder.decode(object.element, "UTF-8");
+                String decoded = URLDecoder.decode(object.text(), "UTF-8");
                 return new ElementTag(decoded);
             }
             catch (Exception e) {
@@ -2606,7 +2641,7 @@ public class ElementTag implements ObjectTag {
         // and "alphabet1" .matches_character_set[abcdefghijklmnopqrstuvwxyz]> returns "false" because it has a "1".
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "matches_character_set", (attribute, object, set) -> {
-            return new ElementTag(new AsciiMatcher(set.element).isOnlyMatches(object.element)); // TODO: Caching!
+            return new ElementTag(new AsciiMatcher(set.text()).isOnlyMatches(object.text())); // TODO: Caching!
         });
 
         // <--[tag]
@@ -2623,7 +2658,7 @@ public class ElementTag implements ObjectTag {
         // and "alphabet1" .trim_to_character_set[abcdefghijklmnopqrstuvwxyz]> returns "alphabet" without the "1".
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "trim_to_character_set", (attribute, object, set) -> {
-            return new ElementTag(new AsciiMatcher(set.element).trimToMatches(object.element)); // TODO: Caching!
+            return new ElementTag(new AsciiMatcher(set.text()).trimToMatches(object.text())); // TODO: Caching!
         });
 
         // <--[tag]
@@ -2721,12 +2756,12 @@ public class ElementTag implements ObjectTag {
             return false;
         }
         ElementTag other = (ElementTag) o;
-        return element.equals(other.element);
+        return text().equals(other.text());
     }
 
     @Override
     public int hashCode() {
-        return element.hashCode();
+        return text().hashCode();
     }
 
     public static class FailedObjectTag implements ObjectTag {
@@ -2770,7 +2805,7 @@ public class ElementTag implements ObjectTag {
             case "integer" -> isInt();
             case "decimal" -> isDouble();
             case "boolean" -> isBoolean();
-            default -> ScriptEvent.runGenericCheck(matcher, element);
+            default -> ScriptEvent.runGenericCheck(matcher, text());
         };
     }
 
