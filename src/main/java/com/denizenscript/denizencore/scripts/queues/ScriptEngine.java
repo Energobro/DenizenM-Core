@@ -61,6 +61,7 @@ public class ScriptEngine {
             return;
         }
         ScriptEntry scriptEntry = scriptQueue.getNext();
+        TimedQueue delayedQueue = scriptQueue instanceof TimedQueue timed ? timed : null;
         while (scriptEntry != null) {
             prepareEntry(scriptQueue, scriptEntry);
             scriptQueue.setLastEntryExecuted(scriptEntry);
@@ -68,8 +69,7 @@ public class ScriptEngine {
                 scriptQueue.holdingOn = scriptEntry;
             }
             CommandExecutor.execute(scriptEntry);
-            if (scriptQueue instanceof TimedQueue) {
-                TimedQueue delayedQueue = (TimedQueue) scriptQueue;
+            if (delayedQueue != null) {
                 if (delayedQueue.isDelayed() || delayedQueue.isPaused()) {
                     break;
                 }
