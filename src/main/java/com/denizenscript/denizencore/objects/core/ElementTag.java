@@ -214,7 +214,7 @@ public class ElementTag implements ObjectTag {
 
     public ElementTag(BigDecimal bdl) {
         this.prefix = "decimal";
-        this.source = bdl;
+        this.source = CoreUtilities.stripDecimal(bdl);
         this.isPlainText = true;
     }
 
@@ -291,7 +291,7 @@ public class ElementTag implements ObjectTag {
     private BigDecimal parsedDecimal() {
         BigDecimal parsed = decimalCache;
         if (parsed == null) {
-            parsed = new BigDecimal(percentageMatcher.trimToNonMatches(text()));
+            parsed = source instanceof BigDecimal bd ? bd : new BigDecimal(percentageMatcher.trimToNonMatches(text()));
             decimalCache = parsed;
         }
         return parsed;

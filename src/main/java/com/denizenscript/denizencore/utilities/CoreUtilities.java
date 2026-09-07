@@ -380,12 +380,16 @@ public class CoreUtilities {
         return random;
     }
 
-    public static String bigDecToString(BigDecimal input) {
+    public static BigDecimal stripDecimal(BigDecimal input) {
         BigDecimal stripped = input.stripTrailingZeros();
         if (stripped.scale() < 0 && input.scale() >= 0) {
             stripped = stripped.setScale(0);
         }
-        return stripped.toString();
+        return stripped;
+    }
+
+    public static String bigDecToString(BigDecimal input) {
+        return stripDecimal(input).toString();
     }
 
     public static DecimalFormat df = new DecimalFormat("0", DecimalFormatSymbols.getInstance(Locale.ENGLISH));
