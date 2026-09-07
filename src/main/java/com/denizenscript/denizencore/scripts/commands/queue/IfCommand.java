@@ -181,11 +181,11 @@ public class IfCommand extends BracedCommand {
         ParsedIf parsed = parsedFor(scriptEntry, "if");
         boolean has_brace = parsed.hasBrace;
         List<BracedData> braces = null;
-        BracedData soleBody = null;
+        boolean hasSoleBody = false;
         if (scriptEntry.getInsideList() != null) {
             ScriptEntry upcoming = scriptEntry.getResidingQueue().script_entries.size() > 0 ? scriptEntry.getResidingQueue().script_entries.get(0) : null;
             if (upcoming == null || !(upcoming.getCommand() instanceof ElseCommand)) {
-                soleBody = getBracedCommands(scriptEntry, false).get(0);
+                hasSoleBody = true;
             }
             else {
             // 'false' - the body is NOT cloned here. parseArgs runs on every execution, and cloning every line of every branch before the
@@ -229,12 +229,12 @@ public class IfCommand extends BracedCommand {
         List<String> subcommand = !has_brace && (parsed.hasSubcommand || parsed.hasElsecommand) ? parsed.subcommand : null;
         List<String> comparisons = parsed.comparisons;
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, "IF", db("use_braces", braces != null || soleBody != null));
+            Debug.report(scriptEntry, "IF", db("use_braces", braces != null || hasSoleBody));
         }
         if (CoreConfiguration.debugVerbose) {
             Debug.log("comparisons=" + comparisons + ", sc:" + subcommand + ", ec:" + elsecommand);
         }
-        boolean first_set = parsedFor(scriptEntry, "if").condition.evaluate(scriptEntry);
+        boolean first_set = parsed.condition.evaluate(scriptEntry);
         if (first_set && subcommand != null && subcommand.size() > 0) {
             executeCommandList(subcommand, scriptEntry);
             return;
@@ -243,7 +243,7 @@ public class IfCommand extends BracedCommand {
             executeCommandList(elsecommand, scriptEntry);
             return;
         }
-        if (soleBody != null) {
+        if (hasSoleBody) {
             if (!first_set) {
                 Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
                 return;
@@ -254,7 +254,7 @@ public class IfCommand extends BracedCommand {
             Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
             List<ScriptEntry> soleList = scriptEntry.inlinedBody;
             if (soleList == null) {
-                soleList = duplicateBracedSection(soleBody, scriptEntry);
+                soleList = duplicateBracedSection(getBracedCommands(scriptEntry, false).get(0), scriptEntry);
                 if (soleList == null) {
                     Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
                     return;
