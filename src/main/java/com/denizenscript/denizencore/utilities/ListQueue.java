@@ -68,16 +68,19 @@ public class ListQueue implements Iterable<ScriptEntry> {
     }
 
     public final void add(ScriptEntry entry) {
+        if (count == 0) {
+            start = 0;
+        }
         ensureCapacity(count * 2 + 1);
         values[count + start] = entry;
         count++;
     }
 
     public final void addAll(List<ScriptEntry> entries) {
-        ensureCapacity(count * 2 + entries.size());
         if (count == 0) {
             start = 0;
         }
+        ensureCapacity(count * 2 + entries.size());
         int firstIndex = start + count;
         for (int i = 0; i < entries.size(); i++) {
             values[firstIndex + i] = entries.get(i);
