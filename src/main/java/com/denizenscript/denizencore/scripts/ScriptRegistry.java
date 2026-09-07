@@ -148,6 +148,10 @@ public class ScriptRegistry {
         return null;
     }
 
+    public static <T extends ScriptContainer> T getScriptContainerLowered(String alreadyLowered) {
+        return (T) scriptContainers.get(alreadyLowered);
+    }
+
     public static <T extends ScriptContainer> T getScriptContainer(String name) {
         ScriptContainer container = scriptContainers.get(CoreUtilities.toLowerCase(name));
         if (container != null) {

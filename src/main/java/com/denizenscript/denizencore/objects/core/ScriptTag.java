@@ -132,7 +132,7 @@ public class ScriptTag implements ObjectTag, Adjustable, FlaggableObject {
 
     public ScriptTag(ScriptContainer container) {
         this.container = container;
-        name = CoreUtilities.toLowerCase(container.getName());
+        name = container.getLoweredName();
     }
 
     ///////////////////////
@@ -144,7 +144,7 @@ public class ScriptTag implements ObjectTag, Adjustable, FlaggableObject {
     private String prefix = "Script";
 
     public ScriptTag validate() {
-        container = ScriptRegistry.getScriptContainer(name);
+        container = ScriptRegistry.getScriptContainerLowered(name);
         return container != null ? this : null;
     }
 

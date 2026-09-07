@@ -75,6 +75,7 @@ public class ScriptContainer implements Debuggable {
         configurationSection.forceLoweredRootKey("speed");
         configurationSection.forceLoweredRootKey("enabled");
         this.name = CoreUtilities.toUpperCase(scriptContainerName);
+        this.loweredName = CoreUtilities.toLowerCase(this.name);
     }
 
     public <T extends ObjectTag> T tagObject(String text, Class<T> type) {
@@ -157,6 +158,12 @@ public class ScriptContainer implements Debuggable {
      * The name of the script container
      */
     private String name;
+
+    private String loweredName;
+
+    public String getLoweredName() {
+        return loweredName;
+    }
 
     /**
      * Gets the name of the script container.
