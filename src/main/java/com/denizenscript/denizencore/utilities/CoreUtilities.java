@@ -381,21 +381,11 @@ public class CoreUtilities {
     }
 
     public static String bigDecToString(BigDecimal input) {
-        String temp = input.toString();
-        if (contains(temp, '.')) {
-            for (int i = temp.length() - 1; i >= 0; i--) {
-                if (temp.charAt(i) != '0') {
-                    if (temp.charAt(i) == '.') {
-                        return temp.substring(0, i);
-                    }
-                    return temp.substring(0, i + 1);
-                }
-            }
+        BigDecimal stripped = input.stripTrailingZeros();
+        if (stripped.scale() < 0 && input.scale() >= 0) {
+            stripped = stripped.setScale(0);
         }
-        if (temp.startsWith("0E")) {
-            return "0";
-        }
-        return temp;
+        return stripped.toString();
     }
 
     public static DecimalFormat df = new DecimalFormat("0", DecimalFormatSymbols.getInstance(Locale.ENGLISH));
