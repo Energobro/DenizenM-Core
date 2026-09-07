@@ -188,11 +188,13 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             frame.owner.setSendingQueue(this);
             frame.owner.updateContext();
         }
-        ScriptQueue priorQueue = CommandExecutor.getCurrentQueue();
-        TagContext priorContext = Debug.getCurrentContext();
+        CommandExecutor.QueueState queueState = CommandExecutor.currentQueueState();
+        Debug.ThreadState debugState = Debug.currentState();
+        ScriptQueue priorQueue = queueState.queue;
+        TagContext priorContext = debugState.context;
         try {
-            CommandExecutor.setCurrentQueue(this);
-            Debug.setCurrentContext(frame.owner.getContext());
+            queueState.queue = this;
+            debugState.context = frame.owner.getContext();
             if (!frame.handler.next(this, frame.owner)) {
                 return false;
             }
@@ -206,8 +208,8 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             return false;
         }
         finally {
-            CommandExecutor.setCurrentQueue(priorQueue);
-            Debug.setCurrentContext(priorContext);
+            queueState.queue = priorQueue;
+            debugState.context = priorContext;
         }
     }
 

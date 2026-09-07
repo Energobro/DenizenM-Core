@@ -19,24 +19,29 @@ import java.util.function.Consumer;
 public class CommandExecutor {
 
     /** The queue currently executing a command on the main thread. Use {@link #getCurrentQueue()} to read this in code that might run off-thread. */
-    public static ScriptQueue currentQueue;
+    /** One thread's currently executing queue. Boxed for the same reason as {@link com.denizenscript.denizencore.utilities.debugging.Debug.ThreadState}. */
+    public static final class QueueState {
 
-    /** The queue currently executing a command on any given non-main thread. */
-    private static final ThreadLocal<ScriptQueue> asyncCurrentQueue = new ThreadLocal<>();
+        public ScriptQueue queue;
+    }
+
+    private static final QueueState mainQueueState = new QueueState();
+
+    private static final ThreadLocal<QueueState> asyncQueueState = ThreadLocal.withInitial(QueueState::new);
+
+    /** The calling thread's queue box. Fetch once and reuse it when doing more than one operation. */
+    public static QueueState currentQueueState() {
+        return DenizenCore.isMainThread() ? mainQueueState : asyncQueueState.get();
+    }
 
     /** Gets the queue currently executing a command on the calling thread, or null if none. */
     public static ScriptQueue getCurrentQueue() {
-        return DenizenCore.isMainThread() ? currentQueue : asyncCurrentQueue.get();
+        return currentQueueState().queue;
     }
 
     /** Sets the queue currently executing a command on the calling thread. */
     public static void setCurrentQueue(ScriptQueue queue) {
-        if (DenizenCore.isMainThread()) {
-            currentQueue = queue;
-        }
-        else {
-            asyncCurrentQueue.set(queue);
-        }
+        currentQueueState().queue = queue;
     }
 
     public static void debugSingleExecution(ScriptEntry scriptEntry) {
@@ -241,15 +246,17 @@ public class CommandExecutor {
         TagManager.recentTagError = false;
         AbstractCommand command = scriptEntry.internal.actualCommand;
         ScriptQueue queue = scriptEntry.getResidingQueue();
-        setCurrentQueue(queue);
+        QueueState queueState = currentQueueState();
+        queueState.queue = queue;
         if (queue.procedural && !command.isProcedural) {
             Debug.echoError("Command " + command.name + " is not accepted within a procedure. Procedures may not produce a change in the world, they may only process logic.");
             return false;
         }
-        TagContext lastContext = Debug.getCurrentContext();
+        Debug.ThreadState debugState = Debug.currentState();
+        TagContext lastContext = debugState.context;
         try {
             TagContext context = scriptEntry.getContext();
-            Debug.setCurrentContext(context);
+            debugState.context = context;
             List<Argument> preprocArgs = scriptEntry.internal.preprocArgs;
             for (int i = 0; i < preprocArgs.size(); i++) {
                 Argument arg = preprocArgs.get(i);
@@ -264,7 +271,7 @@ public class CommandExecutor {
                     }
                     if (!shouldRun) {
                         scriptEntry.setFinished(true);
-                        setCurrentQueue(null);
+                        queueState.queue = null;
                         return true;
                     }
                 }
@@ -282,7 +289,7 @@ public class CommandExecutor {
                 command.parseArgs(scriptEntry);
                 command.execute(scriptEntry);
             }
-            setCurrentQueue(null);
+            queueState.queue = null;
             return true;
         }
         catch (InvalidArgumentsException | InvalidArgumentsRuntimeException e) {
@@ -297,7 +304,7 @@ public class CommandExecutor {
             Debug.log("(Attempted: " + scriptEntry + ")");
             Debug.echoDebug(scriptEntry, Debug.DebugElement.Footer);
             scriptEntry.setFinished(true);
-            setCurrentQueue(null);
+            queueState.queue = null;
             return false;
         }
         catch (Throwable e) {
@@ -306,11 +313,11 @@ public class CommandExecutor {
             Debug.log("(Attempted: " + scriptEntry + ")");
             Debug.echoDebug(scriptEntry, Debug.DebugElement.Footer);
             scriptEntry.setFinished(true);
-            setCurrentQueue(null);
+            queueState.queue = null;
             return false;
         }
         finally {
-            Debug.setCurrentContext(lastContext);
+            debugState.context = lastContext;
         }
     }
 }

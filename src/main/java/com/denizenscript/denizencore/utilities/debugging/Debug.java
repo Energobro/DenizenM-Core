@@ -14,25 +14,35 @@ public class Debug {
     /** Current debug recording text, if recording enabled, for submission to paste server. */
     public static StringBuilder debugRecording = new StringBuilder();
 
-    /** Current main thread context, maintained automatically by stacked calls, for error handling. Use {@link #getCurrentContext()} from code that might run off-thread. */
-    public static TagContext currentContext = null;
+    /**
+     * One thread's current context, for error handling.
+     * <p>
+     * Held in a box rather than in the ThreadLocal directly so that a caller doing several operations - read the old one, install its own,
+     * put the old one back - pays for one thread lookup instead of three. That sequence runs on every command and on every sub-tagged tag read,
+     * so off the main thread it was the single biggest difference between an async queue and the main one.
+     */
+    public static final class ThreadState {
 
-    /** Current context of any given non-main thread (async queues and '~' async commands), for error handling. */
-    private static final ThreadLocal<TagContext> asyncCurrentContext = new ThreadLocal<>();
+        public TagContext context;
+    }
+
+    private static final ThreadState mainState = new ThreadState();
+
+    private static final ThreadLocal<ThreadState> asyncState = ThreadLocal.withInitial(ThreadState::new);
+
+    /** The calling thread's context box. Fetch once and reuse it when doing more than one operation. */
+    public static ThreadState currentState() {
+        return DenizenCore.isMainThread() ? mainState : asyncState.get();
+    }
 
     /** Gets the current context of the calling thread, for error handling. */
     public static TagContext getCurrentContext() {
-        return DenizenCore.isMainThread() ? currentContext : asyncCurrentContext.get();
+        return currentState().context;
     }
 
     /** Sets the current context of the calling thread, for error handling. */
     public static void setCurrentContext(TagContext context) {
-        if (DenizenCore.isMainThread()) {
-            currentContext = context;
-        }
-        else {
-            asyncCurrentContext.set(context);
-        }
+        currentState().context = context;
     }
 
     /** Stack trace helper for current error context. Main thread only - async threads skip error context tracking. */
