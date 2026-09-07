@@ -58,11 +58,13 @@ public class DefinitionStore {
         if (table != forTable) {
             return map.getObject(key);
         }
-        if (slot < filled.length && filled[slot]) {
-            return slots[slot];
+        boolean[] known = filled;
+        ObjectTag[] cache = slots;
+        if (slot < known.length && slot < cache.length && known[slot]) {
+            return cache[slot];
         }
         ObjectTag value = map.getObject(key);
-        if (slot >= filled.length) {
+        if (slot >= filled.length || slot >= slots.length) {
             grow();
         }
         slots[slot] = value;

@@ -473,7 +473,11 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         }
         TagManager.SlotBinding binding = tag.binding;
         if (binding == null || binding.table != table) {
-            binding = new TagManager.SlotBinding(table, table.lookup(definition.low));
+            int slot = table.lookup(definition.low);
+            if (slot == DefinitionSlots.NO_SLOT) {
+                slot = table.assign(definition.low);
+            }
+            binding = new TagManager.SlotBinding(table, slot);
             tag.binding = binding;
         }
         if (binding.slot == DefinitionSlots.NO_SLOT) {
