@@ -1918,6 +1918,11 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + object + "' or '" + second + "' is not a valid decimal number!");
                 return null;
             }
+            Long objectLong = object.asPlainLong(), secondLong = second.asPlainLong();
+            if (objectLong != null && secondLong != null && secondLong != 0
+                    && objectLong % secondLong == 0 && !(objectLong == Long.MIN_VALUE && secondLong == -1)) {
+                return decimalOf(objectLong / secondLong);
+            }
             try {
                 return new ElementTag(object.asBigDecimalRaw().divide(second.asBigDecimalRaw(), 64, RoundingMode.HALF_UP));
             }
@@ -2272,6 +2277,10 @@ public class ElementTag implements ObjectTag {
                 attribute.echoError("Element '" + ele + "' is not a valid decimal number!");
                 return null;
             }
+            Long asLong = ele.asPlainLong();
+            if (asLong != null) {
+                return decimalOf(asLong);
+            }
             return new ElementTag(ele.asBigDecimal().setScale(0, RoundingMode.CEILING));
         });
 
@@ -2286,6 +2295,10 @@ public class ElementTag implements ObjectTag {
             if (!ele.isDouble()) {
                 attribute.echoError("Element '" + ele + "' is not a valid decimal number!");
                 return null;
+            }
+            Long asLong = ele.asPlainLong();
+            if (asLong != null) {
+                return decimalOf(asLong);
             }
             return new ElementTag(ele.asBigDecimal().setScale(0, RoundingMode.FLOOR));
         });
@@ -2373,6 +2386,10 @@ public class ElementTag implements ObjectTag {
             if (!ele.isDouble()) {
                 attribute.echoError("Element '" + ele + "' is not a valid decimal number!");
                 return null;
+            }
+            Long asLong = ele.asPlainLong();
+            if (asLong != null) {
+                return decimalOf(asLong);
             }
             return new ElementTag(ele.asBigDecimal().setScale(0, RoundingMode.HALF_UP));
         });
