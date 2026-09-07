@@ -1,6 +1,7 @@
 package com.denizenscript.denizencore.scripts.commands;
 
 import com.denizenscript.denizencore.objects.ObjectTag;
+import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.tags.TagContext;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
@@ -74,9 +75,15 @@ public class Comparable {
 
     private static boolean compareDecimal(ObjectTag objA, ObjectTag objB, Operator operator, TagContext context) {
         try {
-            BigDecimal bigDecA = objA.asElement().asBigDecimalRaw();
-            BigDecimal bigDecB = objB.asElement().asBigDecimalRaw();
-            int compared = bigDecA.compareTo(bigDecB);
+            ElementTag elementA = objA.asElement(), elementB = objB.asElement();
+            Long longA = elementA.asPlainLong(), longB = elementB.asPlainLong();
+            int compared;
+            if (longA != null && longB != null) {
+                compared = Long.compare(longA, longB);
+            }
+            else {
+                compared = elementA.asBigDecimalRaw().compareTo(elementB.asBigDecimalRaw());
+            }
             switch (operator) {
                 case LESS:
                     return compared < 0;
