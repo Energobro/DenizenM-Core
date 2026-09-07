@@ -217,7 +217,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
      */
     private long delay_time = 0;
 
-    public MapTag definitions = new MapTag();
+    public DefinitionStore definitions = new DefinitionStore();
 
     /**
      * If set, every definition written on this queue records its top-level name here.
@@ -449,7 +449,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     @Override
     public MapTag getAllDefinitions() {
-        return definitions;
+        return definitions.toMap();
     }
 
     public final ScriptEntry getLastEntryExecuted() {

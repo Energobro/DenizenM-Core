@@ -14,6 +14,7 @@ import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.scripts.queues.core.AsyncQueue;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
+import com.denizenscript.denizencore.utilities.DefinitionStore;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 
 import java.util.List;
@@ -224,7 +225,7 @@ public class AsyncCommand extends BracedCommand {
                         subset.putDeepObject(name, value.duplicate());
                     }
                 }
-                subQueue.definitions = subset;
+                subQueue.definitions = new DefinitionStore(subset);
             }
             else {
                 subQueue.definitions = queue.definitions.duplicate();
