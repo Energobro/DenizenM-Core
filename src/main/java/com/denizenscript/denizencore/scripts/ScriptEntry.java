@@ -687,7 +687,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
                     arg = arg.substring(first_colon + 1);
                 }
                 crunchInto(argVal, arg, refContext);
-                if ((argVal.value.hasTag || argVal.prefix != null) && (internal.actualCommand == null || internal.actualCommand.shouldPreParse())) {
+                boolean anyTag = argVal.value.hasTag || (argVal.prefix != null && argVal.prefix.value != null && argVal.prefix.value.hasTag);
+                if (anyTag && (internal.actualCommand == null || internal.actualCommand.shouldPreParse())) {
                     argVal.shouldParse = true;
                 }
                 if (argVal.value.rawObject != null && argVal.prefix == null && internal.actualCommand != null) {
