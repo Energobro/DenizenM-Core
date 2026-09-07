@@ -284,35 +284,38 @@ public class ElementTag implements ObjectTag {
 
     static final BigDecimal max = new BigDecimal("10E1000");
 
-    private BigDecimal getBD(String text) {
-        BigDecimal bd = new BigDecimal(text);
-        if (bd.compareTo(max) >= 1) {
-            Debug.echoError("Unreasonably large number detected!");
-            return max;
-        }
-        if (bd.scale() < 50) {
-            bd = bd.setScale(50);
-        }
-        return bd;
-    }
-
-    private BigDecimal getBDRaw(String text) {
-        BigDecimal bd = new BigDecimal(text);
-        if (bd.compareTo(max) >= 1) {
-            Debug.echoError("Unreasonably large number detected!");
-            return max;
-        }
-        return bd;
-    }
-
     public static AsciiMatcher percentageMatcher = new AsciiMatcher("%");
 
+    private BigDecimal decimalCache;
+
+    private BigDecimal parsedDecimal() {
+        BigDecimal parsed = decimalCache;
+        if (parsed == null) {
+            parsed = new BigDecimal(percentageMatcher.trimToNonMatches(text()));
+            decimalCache = parsed;
+        }
+        return parsed;
+    }
+
     public BigDecimal asBigDecimal() {
-        return getBD(percentageMatcher.trimToNonMatches(text()));
+        BigDecimal parsed = parsedDecimal();
+        if (parsed.compareTo(max) >= 1) {
+            Debug.echoError("Unreasonably large number detected!");
+            return max;
+        }
+        if (parsed.scale() < 50) {
+            return parsed.setScale(50);
+        }
+        return parsed;
     }
 
     public BigDecimal asBigDecimalRaw() {
-        return getBDRaw(percentageMatcher.trimToNonMatches(text()));
+        BigDecimal parsed = parsedDecimal();
+        if (parsed.compareTo(max) >= 1) {
+            Debug.echoError("Unreasonably large number detected!");
+            return max;
+        }
+        return parsed;
     }
 
     public static boolean isPlainLong(String text) {
