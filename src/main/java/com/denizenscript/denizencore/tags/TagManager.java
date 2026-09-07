@@ -556,6 +556,10 @@ public class TagManager {
     }
 
     public static ObjectTag parseChainObject(List<ParseableTagPiece> pieces, TagContext context) {
+        return parseChainObject(pieces, context, 16);
+    }
+
+    public static ObjectTag parseChainObject(List<ParseableTagPiece> pieces, TagContext context, int lengthHint) {
         if (CoreConfiguration.debugVerbose) {
             Debug.log("Tag parse chain: " + pieces + "...");
         }
@@ -574,8 +578,9 @@ public class TagManager {
             result.isRawInput = true;
             return result;
         }
-        StringBuilder helpy = new StringBuilder();
-        for (ParseableTagPiece p : pieces) {
+        StringBuilder helpy = new StringBuilder(lengthHint);
+        for (int i = 0; i < pieces.size(); i++) {
+            ParseableTagPiece p = pieces.get(i);
             if (p.isError) {
                 Debug.echoError(context, p.content);
             }
@@ -618,7 +623,7 @@ public class TagManager {
             txt.content = arg;
             pieces.add(txt);
             ParseableTag result = new ParseableTag(arg);
-            result.pieces = pieces;
+            result.setPieces(pieces);
             return result;
         }
         int[] positions = new int[2];
@@ -629,7 +634,7 @@ public class TagManager {
             txt.content = arg;
             pieces.add(txt);
             ParseableTag result = new ParseableTag(arg);
-            result.pieces = pieces;
+            result.setPieces(pieces);
             return result;
         }
         String orig = arg;
@@ -706,7 +711,7 @@ public class TagManager {
             }
         }
         ParseableTag result = new ParseableTag();
-        result.pieces = pieces;
+        result.setPieces(pieces);
         if (pieces.size() == 1) {
             ParseableTagPiece piece = pieces.get(0);
             result.hasTag = piece.isTag;

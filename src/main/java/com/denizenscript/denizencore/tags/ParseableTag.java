@@ -19,6 +19,18 @@ public class ParseableTag {
 
     public boolean hasTag;
 
+    public int lengthHint = 16;
+
+    public void setPieces(java.util.List<TagManager.ParseableTagPiece> pieces) {
+        this.pieces = pieces;
+        int hint = 0;
+        for (int i = 0; i < pieces.size(); i++) {
+            TagManager.ParseableTagPiece piece = pieces.get(i);
+            hint += piece.isTag || piece.content == null ? 24 : piece.content.length();
+        }
+        lengthHint = hint < 16 ? 16 : hint;
+    }
+
     /**
      * Get the object represented by this tag.
      * If the user input was plaintext (ie not a tag, or text mixed with a tag), with return an ElementTag.
@@ -30,7 +42,7 @@ public class ParseableTag {
         else if (singleTag != null) {
             return TagManager.readSingleTagObject(singleTag, context);
         }
-        return TagManager.parseChainObject(pieces, context);
+        return TagManager.parseChainObject(pieces, context, lengthHint);
     }
 
     public ParseableTag() {
