@@ -199,8 +199,8 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             if (!frame.handler.next(this, frame.owner)) {
                 return false;
             }
-            ScriptEntry.resetBodyForReuse(frame.body);
-            injectEntriesAtStart(frame.body);
+            adoptSlots(frame.body);
+            script_entries.addAllToStartResetting(frame.body);
             return true;
         }
         catch (Throwable ex) {
