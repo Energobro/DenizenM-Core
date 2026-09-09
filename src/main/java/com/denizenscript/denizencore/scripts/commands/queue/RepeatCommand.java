@@ -8,6 +8,7 @@ import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.DefinitionSlots;
+import com.denizenscript.denizencore.utilities.LoopValue;
 import com.denizenscript.denizencore.utilities.EnumHelper;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.objects.core.ElementTag;
@@ -79,6 +80,7 @@ public class RepeatCommand extends BracedCommand {
         public StringHolder valueHolder;
         public ObjectTag originalValue;
         public DefinitionSlots slotTable;
+        public LoopValue.Counter counter;
         public int valueSlot = DefinitionSlots.NO_SLOT;
 
         public void reapplyAtEnd(ScriptQueue queue) {
@@ -168,7 +170,9 @@ public class RepeatCommand extends BracedCommand {
             datum.valueSlot = ScriptQueue.slotFor(scriptEntry, datum.valueHolder);
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
-            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, new ElementTag(datum.index));
+            datum.counter = new LoopValue.Counter(datum.index);
+            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.counter);
+            datum.counter.installed = true;
         }
     }
 
@@ -185,7 +189,11 @@ public class RepeatCommand extends BracedCommand {
         if (owner.dbCallShouldDebug()) {
             Debug.echoDebug(owner, Debug.DebugElement.Header, "Repeat loop " + data.index);
         }
-        queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, new ElementTag(data.index));
+        data.counter.value = data.index;
+        if (!data.counter.installed) {
+            queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, data.counter);
+            data.counter.installed = true;
+        }
         return true;
     };
 }

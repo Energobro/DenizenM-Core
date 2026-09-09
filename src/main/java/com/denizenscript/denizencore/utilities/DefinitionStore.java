@@ -25,7 +25,23 @@ public class DefinitionStore {
     }
 
     public ObjectTag getObject(StringHolder key) {
-        return map.getObject(key);
+        ObjectTag value = map.getObject(key);
+        return value instanceof LoopValue holder ? holder.resolve() : value;
+    }
+
+    private static void disarm(ObjectTag previous) {
+        if (previous instanceof LoopValue holder) {
+            holder.installed = false;
+        }
+    }
+
+    private void resolveInPlace() {
+        for (java.util.Map.Entry<StringHolder, ObjectTag> entry : map.map.entrySet()) {
+            if (entry.getValue() instanceof LoopValue holder) {
+                holder.installed = false;
+                entry.setValue(holder.resolve());
+            }
+        }
     }
 
     public ObjectTag getDeepObject(String key) {
@@ -37,16 +53,25 @@ public class DefinitionStore {
     }
 
     public void putDeepObject(StringHolder[] path, ObjectTag value) {
+        disarm(map.getObject(path[0]));
         map.putDeepObject(path, value);
         invalidate(path[0].low);
     }
 
     public void putObject(StringHolder key, ObjectTag value) {
-        map.putObject(key, value);
+        if (value == null) {
+            disarm(map.getObject(key));
+            map.putObject(key, value);
+        }
+        else {
+            disarm(map.map.put(key, value));
+        }
         invalidate(key.low);
     }
 
     public void putDeepObject(String key, ObjectTag value) {
+        int dotAt = key.indexOf('.');
+        disarm(map.getObject(new StringHolder(dotAt == -1 ? key : key.substring(0, dotAt))));
         map.putDeepObject(key, value);
         if (table != null) {
             int dot = key.indexOf('.');
@@ -56,12 +81,13 @@ public class DefinitionStore {
 
     public ObjectTag getSlot(DefinitionSlots forTable, int slot, StringHolder key) {
         if (table != forTable) {
-            return map.getObject(key);
+            return getObject(key);
         }
         boolean[] known = filled;
         ObjectTag[] cache = slots;
         if (slot < known.length && slot < cache.length && known[slot]) {
-            return cache[slot];
+            ObjectTag cached = cache[slot];
+            return cached instanceof LoopValue holder ? holder.resolve() : cached;
         }
         ObjectTag value = map.getObject(key);
         if (slot >= filled.length || slot >= slots.length) {
@@ -69,11 +95,17 @@ public class DefinitionStore {
         }
         slots[slot] = value;
         filled[slot] = true;
-        return value;
+        return value instanceof LoopValue holder ? holder.resolve() : value;
     }
 
     public void putSlot(DefinitionSlots forTable, int slot, StringHolder key, ObjectTag value) {
-        map.putObject(key, value);
+        if (value == null) {
+            disarm(map.getObject(key));
+            map.putObject(key, value);
+        }
+        else {
+            disarm(map.map.put(key, value));
+        }
         if (table != forTable) {
             if (table != null) {
                 invalidate(key.low);
@@ -121,6 +153,7 @@ public class DefinitionStore {
     }
 
     public DefinitionStore duplicate() {
+        resolveInPlace();
         DefinitionStore result = new DefinitionStore(map.duplicate());
         if (table != null) {
             result.bind(table);
@@ -129,6 +162,7 @@ public class DefinitionStore {
     }
 
     public MapTag toMap() {
+        resolveInPlace();
         return map;
     }
 }

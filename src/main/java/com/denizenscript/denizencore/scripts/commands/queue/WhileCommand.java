@@ -4,6 +4,7 @@ import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.DefinitionSlots;
+import com.denizenscript.denizencore.utilities.LoopValue;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
@@ -57,6 +58,7 @@ public class WhileCommand extends BracedCommand {
         public int instaTicks;
         public ObjectTag originalIndexValue;
         public DefinitionSlots slotTable;
+        public LoopValue.Counter indexCounter;
         public int indexSlot = DefinitionSlots.NO_SLOT;
 
         public void reapplyAtEnd(ScriptQueue queue) {
@@ -104,7 +106,11 @@ public class WhileCommand extends BracedCommand {
         if (owner.dbCallShouldDebug()) {
             Debug.echoDebug(owner, Debug.DebugElement.Header, "While loop " + data.index);
         }
-        queue.addDefinitionSlot(data.slotTable, data.indexSlot, ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
+        data.indexCounter.value = data.index;
+        if (!data.indexCounter.installed) {
+            queue.addDefinitionSlot(data.slotTable, data.indexSlot, ScriptQueue.LOOP_INDEX_KEY, data.indexCounter);
+            data.indexCounter.installed = true;
+        }
         return true;
     };
 
@@ -209,7 +215,9 @@ public class WhileCommand extends BracedCommand {
             datum.indexSlot = ScriptQueue.slotFor(scriptEntry, ScriptQueue.LOOP_INDEX_KEY);
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
-            queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, new ElementTag(1));
+            datum.indexCounter = new LoopValue.Counter(1);
+            queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, datum.indexCounter);
+            datum.indexCounter.installed = true;
         }
     }
 }

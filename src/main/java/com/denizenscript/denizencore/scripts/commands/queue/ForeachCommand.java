@@ -11,6 +11,7 @@ import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgRaw;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.DefinitionSlots;
+import com.denizenscript.denizencore.utilities.LoopValue;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
@@ -95,6 +96,9 @@ public class ForeachCommand extends BracedCommand {
 
         public StringHolder valueHolder, keyHolder;
         public DefinitionSlots slotTable;
+        public LoopValue.Counter indexCounter;
+        public LoopValue.Cell valueCell;
+        public LoopValue.Cell keyCell;
         public int valueSlot = DefinitionSlots.NO_SLOT, keySlot = DefinitionSlots.NO_SLOT, indexSlot = DefinitionSlots.NO_SLOT;
         public ObjectTag originalValue, originalKeyValue, originalIndexValue;
 
@@ -220,10 +224,16 @@ public class ForeachCommand extends BracedCommand {
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
             if (datum.keys != null) {
-                queue.addDefinitionSlot(datum.slotTable, datum.keySlot, datum.keyHolder, new ElementTag(datum.keys.get(0)));
+                datum.keyCell = new LoopValue.Cell(new ElementTag(datum.keys.get(0)));
+                queue.addDefinitionSlot(datum.slotTable, datum.keySlot, datum.keyHolder, datum.keyCell);
+                datum.keyCell.installed = true;
             }
-            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.list.getObject(0));
-            queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, new ElementTag(1));
+            datum.valueCell = new LoopValue.Cell(datum.list.getObject(0));
+            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.valueCell);
+            datum.valueCell.installed = true;
+            datum.indexCounter = new LoopValue.Counter(1);
+            queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, datum.indexCounter);
+            datum.indexCounter.installed = true;
         }
     }
 
@@ -240,11 +250,23 @@ public class ForeachCommand extends BracedCommand {
         if (owner.dbCallShouldDebug()) {
             Debug.echoDebug(owner, Debug.DebugElement.Header, "Foreach loop " + data.index);
         }
-        queue.addDefinitionSlot(data.slotTable, data.indexSlot, ScriptQueue.LOOP_INDEX_KEY, new ElementTag(data.index));
-        if (data.keys != null) {
-            queue.addDefinitionSlot(data.slotTable, data.keySlot, data.keyHolder, new ElementTag(data.keys.get(data.index - 1)));
+        data.indexCounter.value = data.index;
+        if (!data.indexCounter.installed) {
+            queue.addDefinitionSlot(data.slotTable, data.indexSlot, ScriptQueue.LOOP_INDEX_KEY, data.indexCounter);
+            data.indexCounter.installed = true;
         }
-        queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, data.list.getObject(data.index - 1));
+        if (data.keys != null) {
+            data.keyCell.value = new ElementTag(data.keys.get(data.index - 1));
+            if (!data.keyCell.installed) {
+                queue.addDefinitionSlot(data.slotTable, data.keySlot, data.keyHolder, data.keyCell);
+                data.keyCell.installed = true;
+            }
+        }
+        data.valueCell.value = data.list.getObject(data.index - 1);
+        if (!data.valueCell.installed) {
+            queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, data.valueCell);
+            data.valueCell.installed = true;
+        }
         return true;
     };
 }
