@@ -401,8 +401,6 @@ public class CoreUtilities {
         floatFormat.setMaximumFractionDigits(8);
     }
 
-    private static final ThreadLocal<DecimalFormat> localFloatFormat = ThreadLocal.withInitial(() -> (DecimalFormat) floatFormat.clone());
-
     public static String floatToCleanString(float input) {
         if (Float.isNaN(input)) {
             return "NaN";
@@ -431,7 +429,8 @@ public class CoreUtilities {
         if (whole != null) {
             return whole;
         }
-        return localFloatFormat.get().format(input);
+        String rounded = BigDecimal.valueOf(input).setScale(8, RoundingMode.HALF_EVEN).stripTrailingZeros().toPlainString();
+        return input < 0 && rounded.equals("0") ? "-0" : rounded;
     }
 
     public static String doubleToString(double input) {

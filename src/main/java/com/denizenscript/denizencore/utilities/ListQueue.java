@@ -113,34 +113,6 @@ public class ListQueue implements Iterable<ScriptEntry> {
         count += entries.size();
     }
 
-    /**
-     * Puts a loop body back at the front, resetting each entry as it goes.
-     * <p>
-     * A loop turn used to walk its body twice - once to reset the entries, once to place them. The two walks are the same walk.
-     */
-    public final void addAllToStartResetting(List<ScriptEntry> entries) {
-        int added = entries.size();
-        if (count == 0) {
-            start = 0;
-            ensureCapacity(added);
-        }
-        else if (start >= added) {
-            start -= added;
-        }
-        else {
-            ScriptEntry[] newSet = new ScriptEntry[values.length + added];
-            System.arraycopy(values, start, newSet, added, count);
-            values = newSet;
-            start = 0;
-        }
-        for (int i = 0; i < added; i++) {
-            ScriptEntry entry = entries.get(i);
-            entry.resetForReuse();
-            values[start + i] = entry;
-        }
-        count += added;
-    }
-
     public class ListQueueIterator implements Iterator<ScriptEntry> {
 
         public int index;

@@ -87,7 +87,7 @@ public class RandomCommand extends BracedCommand {
             if (scriptEntry.getElement("possibilities").asInt() <= 1) {
                 throw new InvalidArgumentsException("Must randomly select more than one item.");
             }
-            if (scriptEntry.getResidingQueue().getQueueSize() < scriptEntry.getElement("possibilities").asInt()) {
+            if (scriptEntry.getResidingQueue().pendingEntryCount() < scriptEntry.getElement("possibilities").asInt()) {
                 throw new InvalidArgumentsException("Invalid Size! Random # must not be larger than the script!");
             }
         }
@@ -129,13 +129,18 @@ public class RandomCommand extends BracedCommand {
         if (bracedCommands == null) {
             ScriptEntry keeping = null;
             for (int x = 0; x < possibilities; x++) {
-                if (x == selected) {
-                    Debug.echoDebug(scriptEntry, "...selected '" + queue.getEntry(0).getCommandName() + ": " + queue.getEntry(0).getOriginalArguments() + "'.");
-                    keeping = queue.getEntry(0);
+                ScriptEntry option = queue.consumePending();
+                if (option == null) {
+                    break;
                 }
-                queue.removeFirst();
+                if (x == selected) {
+                    Debug.echoDebug(scriptEntry, "...selected '" + option.getCommandName() + ": " + option.getOriginalArguments() + "'.");
+                    keeping = option;
+                }
             }
-            queue.injectEntryAtStart(keeping);
+            if (keeping != null) {
+                queue.injectEntryAtStart(keeping);
+            }
         }
         else {
             queue.injectEntryAtStart(optionFor(scriptEntry, selected, bracedCommands.get(selected)));

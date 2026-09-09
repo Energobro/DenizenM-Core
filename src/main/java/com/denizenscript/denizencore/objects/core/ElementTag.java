@@ -214,8 +214,11 @@ public class ElementTag implements ObjectTag {
 
     public ElementTag(BigDecimal bdl) {
         this.prefix = "decimal";
-        this.source = CoreUtilities.stripDecimal(bdl);
+        BigDecimal stripped = CoreUtilities.stripDecimal(bdl);
+        this.source = stripped;
         this.isPlainText = true;
+        this.numberCache = stripped.scale() == 0 && stripped.precision() + (stripped.signum() < 0 ? 1 : 0) <= 18
+                ? (Object) Long.valueOf(stripped.longValue()) : (Object) Double.valueOf(stripped.doubleValue());
     }
 
     public ElementTag(double dbl) {
@@ -276,13 +279,15 @@ public class ElementTag implements ObjectTag {
             result = Long.toString(value.longValue());
         }
         else {
-            result = CoreUtilities.bigDecToString((BigDecimal) src);
+            result = src.toString();
         }
         lazyText = result;
         return result;
     }
 
     static final BigDecimal max = new BigDecimal("10E1000");
+
+    static final long doubleExactLimit = 1L << 53;
 
     public static AsciiMatcher percentageMatcher = new AsciiMatcher("%");
 
@@ -291,10 +296,34 @@ public class ElementTag implements ObjectTag {
     private BigDecimal parsedDecimal() {
         BigDecimal parsed = decimalCache;
         if (parsed == null) {
-            parsed = source instanceof BigDecimal bd ? bd : new BigDecimal(percentageMatcher.trimToNonMatches(text()));
+            parsed = decimalFromSource();
+            if (parsed == null) {
+                parsed = new BigDecimal(percentageMatcher.trimToNonMatches(text()));
+            }
             decimalCache = parsed;
         }
         return parsed;
+    }
+
+    private BigDecimal decimalFromSource() {
+        Object src = source;
+        if (src instanceof BigDecimal bd) {
+            return bd;
+        }
+        if (src instanceof Long value) {
+            return BigDecimal.valueOf(value.longValue());
+        }
+        if (src instanceof Double value) {
+            double dbl = value.doubleValue();
+            if ((long) dbl == dbl && Math.abs(dbl) < 1e15) {
+                return BigDecimal.valueOf((long) dbl);
+            }
+            double abs = Math.abs(dbl);
+            if (abs >= 1e-3 && abs < 1e7) {
+                return BigDecimal.valueOf(dbl);
+            }
+        }
+        return null;
     }
 
     public BigDecimal asBigDecimal() {
@@ -1969,6 +1998,13 @@ public class ElementTag implements ObjectTag {
             if (objectLong != null && secondLong != null && secondLong != 0
                     && objectLong % secondLong == 0 && !(objectLong == Long.MIN_VALUE && secondLong == -1)) {
                 return decimalOf(objectLong / secondLong);
+            }
+            if ((objectLong == null || (objectLong <= doubleExactLimit && objectLong >= -doubleExactLimit))
+                    && (secondLong == null || (secondLong <= doubleExactLimit && secondLong >= -doubleExactLimit))) {
+                double result = object.asDouble() / second.asDouble();
+                if (Double.isFinite(result) && result <= doubleExactLimit && result >= -doubleExactLimit) {
+                    return new ElementTag(result);
+                }
             }
             try {
                 return new ElementTag(object.asBigDecimalRaw().divide(second.asBigDecimalRaw(), 20, RoundingMode.HALF_UP));

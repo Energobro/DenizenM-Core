@@ -21,6 +21,7 @@ import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.function.Consumer;
+import java.util.function.Predicate;
 import java.util.stream.Collectors;
 
 public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
@@ -107,7 +108,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
      */
     public Consumer<String> debugOutput = null;
 
-    public final ListQueue script_entries = new ListQueue(4);
+    private final ListQueue script_entries = new ListQueue(4);
 
     /**
      * Decides whether a loop runs its body once more, and does the per-iteration work (counter, definitions, debug header) when it does.
@@ -118,17 +119,18 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     /**
-     * A loop in progress: the body to run, and the point in the queue at which the body is finished.
+     * A loop in progress: the body to run, how far through it the queue has got, and the point in the queue at which the body is finished.
      * <p>
-     * The body is not held as a separate list of pending entries - it is injected into the queue like any other entries, and the frame
-     * only records how long the queue was underneath it ({@link #tailSize}). Anything the body injects while it runs (an if block, an
-     * inject, a nested loop) sits above that mark and is consumed before it, so the mark stays valid without being touched.
+     * The body is never placed in the queue - the frame serves it one entry at a time from {@link #pointer}, and an iteration is a reset
+     * of that pointer rather than a fresh copy of the body. {@link #tailSize} records how long the queue was underneath the loop, so
+     * anything the body injects while it runs (an if block, an inject, a nested loop) sits above that mark and is consumed first.
      */
     public static class LoopFrame {
         public ScriptEntry owner;
         public List<ScriptEntry> body;
         public LoopIteration handler;
         public int tailSize;
+        public int pointer;
     }
 
     public ArrayList<LoopFrame> loopFrames = null;
@@ -143,7 +145,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         frame.handler = handler;
         frame.tailSize = script_entries.size();
         loopFrames.add(frame);
-        injectEntriesAtStart(body);
+        adoptSlots(body);
     }
 
     public final LoopFrame findLoopFrame(String commandName) {
@@ -166,6 +168,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         while (script_entries.size() > frame.tailSize) {
             script_entries.removeFirst();
         }
+        frame.pointer = frame.body.size();
     }
 
     public final void endLoopFrame(LoopFrame frame) {
@@ -199,8 +202,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             if (!frame.handler.next(this, frame.owner)) {
                 return false;
             }
-            adoptSlots(frame.body);
-            script_entries.addAllToStartResetting(frame.body);
+            frame.pointer = 0;
             return true;
         }
         catch (Throwable ex) {
@@ -607,7 +609,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             entry.setInstant(true);
             entry.setSendingQueue(newQueue);
             entry.updateContext();
-            newQueue.script_entries.add(entry);
+            newQueue.appendPending(entry);
         }
         if (loopFrames != null && !loopFrames.isEmpty()) {
             newQueue.loopFrames = new ArrayList<>(loopFrames);
@@ -695,14 +697,16 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
      * @param entries the entries to be run.
      */
     public final void runNow(List<ScriptEntry> entries) {
-        ScriptEntry nextup = getQueueSize() > 0 ? getEntry(0) : null;
+        int baseSize = getQueueSize(), baseFrames = loopFrames == null ? 0 : loopFrames.size();
         injectEntriesAtStart(entries);
-        while (getQueueSize() > 0 && getEntry(0) != nextup) {
-            getEntry(0).setInstant(true);
+        while (getQueueSize() > baseSize || (loopFrames != null && loopFrames.size() > baseFrames)) {
+            ScriptEntry next = peekPending();
+            if (next != null) {
+                next.setInstant(true);
+            }
             holdingOn = null;
             ScriptEngine.revolveOnceForce(this);
         }
-        return;
     }
 
     /**
@@ -765,6 +769,11 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             if (size > frame.tailSize) {
                 break;
             }
+            if (size == frame.tailSize && frame.pointer < frame.body.size()) {
+                ScriptEntry entry = frame.body.get(frame.pointer++);
+                entry.resetForReuse();
+                return entry;
+            }
             // Below the mark means something cut the queue back past this loop, eg a goto out of it - the loop is over either way, but it doesn't get another turn.
             if (size < frame.tailSize || !runLoopIteration(frame)) {
                 loopFrames.remove(loopFrames.size() - 1);
@@ -792,6 +801,141 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         }
     }
 
+    /** Adds one already-prepared entry to the end of what is queued. */
+    public final void appendPending(ScriptEntry entry) {
+        script_entries.add(entry);
+    }
+
+    /**
+     * The entry this queue will run next, without taking it, or null when nothing is queued.
+     * <p>
+     * A loop body is served from its frame rather than from the queue, so inside one this is the body's next entry, and a reader that has
+     * reached the end of the body sees nothing rather than the entries waiting past the loop.
+     */
+    public final ScriptEntry peekPending() {
+        LoopFrame frame = servingFrame();
+        if (frame != null) {
+            return frame.pointer < frame.body.size() ? frame.body.get(frame.pointer) : null;
+        }
+        return script_entries.isEmpty() ? null : script_entries.get(0);
+    }
+
+    /** Takes the next queued entry off the queue and returns it, or null when nothing is queued. */
+    public final ScriptEntry consumePending() {
+        LoopFrame frame = servingFrame();
+        if (frame != null) {
+            return frame.pointer < frame.body.size() ? frame.body.get(frame.pointer++) : null;
+        }
+        return script_entries.isEmpty() ? null : script_entries.removeFirst();
+    }
+
+    /** The frame the next entry will be served from, or null when it comes from the queue itself. */
+    private LoopFrame servingFrame() {
+        if (loopFrames == null || loopFrames.isEmpty()) {
+            return null;
+        }
+        LoopFrame frame = loopFrames.get(loopFrames.size() - 1);
+        return script_entries.size() == frame.tailSize ? frame : null;
+    }
+
+    /**
+     * Visits the entries queued to run, in the order they will run.
+     * <p>
+     * Narrower than {@link #forEachPendingEntry}, which also reaches a loop body that is being held between iterations and the
+     * loop owners themselves. This one is what a reader of the queue sees as "waiting to run".
+     */
+    public final void forEachQueuedEntry(Consumer<ScriptEntry> action) {
+        findUpcoming(entry -> {
+            action.accept(entry);
+            return false;
+        });
+    }
+
+    /**
+     * Walks what the queue will run, in the order it will run it, and returns the first entry the test accepts.
+     * <p>
+     * The stream is not the pending list: a loop's unserved body sits between the entries injected above the loop and the entries
+     * waiting below its mark, and every frame on the stack contributes the part of its body it has not reached yet.
+     */
+    public final ScriptEntry findUpcoming(Predicate<ScriptEntry> test) {
+        int index = 0, size = script_entries.size();
+        if (loopFrames != null) {
+            for (int f = loopFrames.size() - 1; f >= 0; f--) {
+                LoopFrame frame = loopFrames.get(f);
+                int above = size - frame.tailSize;
+                while (index < above) {
+                    ScriptEntry entry = script_entries.get(index++);
+                    if (test.test(entry)) {
+                        return entry;
+                    }
+                }
+                for (int i = frame.pointer; i < frame.body.size(); i++) {
+                    ScriptEntry entry = frame.body.get(i);
+                    if (test.test(entry)) {
+                        return entry;
+                    }
+                }
+            }
+        }
+        while (index < size) {
+            ScriptEntry entry = script_entries.get(index++);
+            if (test.test(entry)) {
+                return entry;
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Drops whatever the queue would run next until the test accepts the entry in front, which is left in place to run.
+     * <p>
+     * Skipping past a loop ends it - the frame is dropped rather than asked for another iteration, which is what jumping out of a loop means.
+     */
+    public final boolean skipUpcomingUntil(Predicate<ScriptEntry> test) {
+        while (true) {
+            LoopFrame frame = loopFrames == null || loopFrames.isEmpty() ? null : loopFrames.get(loopFrames.size() - 1);
+            if (frame != null && script_entries.size() <= frame.tailSize) {
+                if (script_entries.size() < frame.tailSize || frame.pointer >= frame.body.size()) {
+                    loopFrames.remove(loopFrames.size() - 1);
+                }
+                else if (test.test(frame.body.get(frame.pointer))) {
+                    return true;
+                }
+                else {
+                    frame.pointer++;
+                }
+            }
+            else if (!script_entries.isEmpty()) {
+                if (test.test(script_entries.get(0))) {
+                    return true;
+                }
+                script_entries.removeFirst();
+            }
+            else {
+                return false;
+            }
+        }
+    }
+
+    /** How many entries the queue will still run, counting the parts of loop bodies that have not been served yet. */
+    public final int pendingEntryCount() {
+        int count = script_entries.size();
+        if (loopFrames != null) {
+            for (int i = 0; i < loopFrames.size(); i++) {
+                LoopFrame frame = loopFrames.get(i);
+                count += frame.body.size() - frame.pointer;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * The raw list of entries waiting on the queue itself, which is not everything the queue will run: a loop serves its body from its
+     * frame, so the part of a body that has not been reached yet is not in here, and neither is a nested loop's.
+     * <p>
+     * Nothing in the engine uses this - {@link #findUpcoming} walks what will actually run, in order, and {@link #forEachPendingEntry}
+     * reaches every entry that may still run. It stays for third-party addons, and it is a trap for them for exactly the reason above.
+     */
     public final ListQueue getEntries() {
         return script_entries;
     }
@@ -825,6 +969,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         script_entries.addAllToStart(entries);
     }
 
+    /** Drops the queue's own first entry. Blind to a loop body being served from its frame - see {@link #getEntries()}, and prefer {@link #consumePending()}. */
     public final boolean removeFirst() {
         if (script_entries.isEmpty()) {
             return false;
@@ -833,6 +978,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         return true;
     }
 
+    /** Reads by position within the queue's own entries. Blind to a loop body being served from its frame - see {@link #getEntries()}. */
     public final ScriptEntry getEntry(int position) {
         if (script_entries.size() < position) {
             return null;
@@ -844,6 +990,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         script_entries.injectAtStart(entry);
     }
 
+    /** How many entries are on the queue itself. Script-visible counts want {@link #pendingEntryCount()}, which also counts unserved loop bodies. */
     public final int getQueueSize() {
         return script_entries.size();
     }
@@ -854,7 +1001,11 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     @Override
     public boolean shouldDebug() {
-        return (lastEntryExecuted != null ? lastEntryExecuted.shouldDebug() : script_entries.get(0).shouldDebug());
+        if (lastEntryExecuted != null) {
+            return lastEntryExecuted.shouldDebug();
+        }
+        ScriptEntry next = peekPending();
+        return next == null || next.shouldDebug();
     }
 
     @Override

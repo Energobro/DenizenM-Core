@@ -183,7 +183,7 @@ public class IfCommand extends BracedCommand {
         List<BracedData> braces = null;
         boolean hasSoleBody = false;
         if (scriptEntry.getInsideList() != null) {
-            ScriptEntry upcoming = scriptEntry.getResidingQueue().script_entries.size() > 0 ? scriptEntry.getResidingQueue().script_entries.get(0) : null;
+            ScriptEntry upcoming = scriptEntry.getResidingQueue().peekPending();
             if (upcoming == null || !(upcoming.getCommand() instanceof ElseCommand)) {
                 hasSoleBody = true;
             }
@@ -198,16 +198,16 @@ public class IfCommand extends BracedCommand {
             ifRef.key = parsed.key;
             ifRef.args = parsed.bracedArgs;
             allData.add(ifRef);
-            while (scriptEntry.getResidingQueue().script_entries.size() > 0) {
-                ScriptEntry nextEntry = scriptEntry.getResidingQueue().script_entries.get(0);
-                if (!(nextEntry.getCommand() instanceof ElseCommand)) {
+            while (true) {
+                ScriptEntry nextEntry = scriptEntry.getResidingQueue().peekPending();
+                if (nextEntry == null || !(nextEntry.getCommand() instanceof ElseCommand)) {
                     break;
                 }
                 if (nextEntry.getInsideList() == null) {
                     Debug.echoError(scriptEntry, "Upcoming else command is mis-formatted!");
                     break;
                 }
-                scriptEntry.getResidingQueue().script_entries.removeFirst();
+                scriptEntry.getResidingQueue().consumePending();
                 nextEntry.context = scriptEntry.context;
                 nextEntry.entryData = scriptEntry.entryData;
                 nextEntry.queue = scriptEntry.queue;

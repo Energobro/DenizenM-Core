@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 
 import java.util.List;
+import java.util.function.Predicate;
 
 public class GotoCommand extends AbstractCommand {
 
@@ -51,24 +52,12 @@ public class GotoCommand extends AbstractCommand {
 
     public static void autoExecute(ScriptQueue queue,
                                    @ArgRaw @ArgLinear @ArgName("mark_name") String markName) {
-        boolean hasmark = false;
-        for (int i = 0; i < queue.getQueueSize(); i++) {
-            ScriptEntry entry = queue.getEntry(i);
+        Predicate<ScriptEntry> isMark = entry -> {
             List<String> args = entry.getOriginalArguments();
-            if (CoreUtilities.equalsIgnoreCase(entry.getCommandName(), "mark") && args.size() > 0 && CoreUtilities.equalsIgnoreCase(args.get(0), markName)) {
-                hasmark = true;
-                break;
-            }
-        }
-        if (hasmark) {
-            while (queue.getQueueSize() > 0) {
-                ScriptEntry entry = queue.getEntry(0);
-                List<String> args = entry.getOriginalArguments();
-                if (CoreUtilities.equalsIgnoreCase(entry.getCommandName(), "mark") && args.size() > 0 && CoreUtilities.equalsIgnoreCase(args.get(0), markName)) {
-                    break;
-                }
-                queue.removeFirst();
-            }
+            return CoreUtilities.equalsIgnoreCase(entry.getCommandName(), "mark") && args.size() > 0 && CoreUtilities.equalsIgnoreCase(args.get(0), markName);
+        };
+        if (queue.findUpcoming(isMark) != null) {
+            queue.skipUpcomingUntil(isMark);
         }
         else {
             Debug.echoError("Cannot go to that location - doesn't seem to exist!");

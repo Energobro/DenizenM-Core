@@ -171,7 +171,7 @@ public class QueueTag implements ObjectTag, Adjustable, FlaggableObject {
         // Returns the number of script entries in the queue.
         // -->
         tagProcessor.registerTag(ElementTag.class, "size", (attribute, object) -> {
-            return new ElementTag(object.getQueue().script_entries.size());
+            return new ElementTag(object.getQueue().pendingEntryCount());
         });
 
         // <--[tag]
@@ -286,14 +286,14 @@ public class QueueTag implements ObjectTag, Adjustable, FlaggableObject {
         // -->
         tagProcessor.registerTag(ListTag.class, "commands", (attribute, object) -> {
             ListTag commands = new ListTag();
-            for (ScriptEntry entry : object.getQueue().script_entries) {
+            object.getQueue().forEachQueuedEntry(entry -> {
                 StringBuilder sb = new StringBuilder();
                 sb.append(entry.getCommandName()).append(" ");
                 for (String arg : entry.getOriginalArguments()) {
                     sb.append(arg).append(" ");
                 }
                 commands.add(sb.substring(0, sb.length() - 1));
-            }
+            });
             return commands;
         });
 
