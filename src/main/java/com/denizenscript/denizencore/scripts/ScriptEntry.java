@@ -425,6 +425,10 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
     public List<List<ScriptEntry>> inlinedBranches = null;
 
+    private static boolean carriesTag(InternalArgument arg) {
+        return (arg.value != null && arg.value.hasTag) || (arg.prefix != null && arg.prefix.value != null && arg.prefix.value.hasTag);
+    }
+
     public void resetForReuse() {
         if (objects != null) {
             objects.clear();
@@ -791,7 +795,10 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
                 for (CommandExecutionGenerator.ArgData arg : internal.actualCommand.generatedExecutor.args) {
                     if (arg.isLinear) {
                         if (arg.index < internal.arguments_to_use.length) {
-                            internal.arguments_to_use[arg.index].shouldParse = arg.shouldParse;
+                            InternalArgument target = internal.arguments_to_use[arg.index];
+                            if (target != NULL_INTERNAL_ARGUMENT) {
+                                target.shouldParse = arg.shouldParse && carriesTag(target);
+                            }
                         }
                     }
                 }
