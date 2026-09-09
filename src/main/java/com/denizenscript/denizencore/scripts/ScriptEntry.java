@@ -92,7 +92,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
         public Integer[] prefixedArgMapper = null;
 
-        public Boolean shouldDebugBool = null;
+        public byte shouldDebugState = 0;
 
         public int defObjects = 8;
 
@@ -145,7 +145,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             result.prefixedArgMapper = prefixedArgMapper;
             result.enumVals = enumVals == null ? null : enumVals.clone();
             result.booleans = booleans == null ? null : booleans.clone();
-            result.shouldDebugBool = shouldDebugBool;
+            result.shouldDebugState = shouldDebugState;
             result.defObjects = defObjects;
             result.asyncBlockMaxNanos = asyncBlockMaxNanos;
             if (preprocArgs != null) {
@@ -1038,20 +1038,25 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
     /////////
 
     public boolean dbCallShouldDebug() {
-        return Debug.shouldDebug(this);
+        if (CoreConfiguration.debugOverride) {
+            return true;
+        }
+        if (!CoreConfiguration.shouldShowDebug) {
+            return false;
+        }
+        return shouldDebug();
     }
 
     @Override
     public boolean shouldDebug() {
-        if (internal.shouldDebugBool != null) {
-            return internal.shouldDebugBool;
-        }
-        if (internal.script == null || internal.script.getContainer() == null) {
-            internal.shouldDebugBool = true;
-            return true;
-        }
-        internal.shouldDebugBool = internal.script.getContainer().shouldDebug();
-        return internal.shouldDebugBool;
+        byte state = internal.shouldDebugState;
+        return state != 0 ? state == 1 : computeShouldDebug();
+    }
+
+    private boolean computeShouldDebug() {
+        boolean result = internal.script == null || internal.script.getContainer() == null || internal.script.getContainer().shouldDebug();
+        internal.shouldDebugState = result ? (byte) 1 : (byte) 2;
+        return result;
     }
 
     private static String stringifyArg(String arg) {
