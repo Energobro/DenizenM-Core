@@ -67,17 +67,32 @@ public class CommandExecutionGenerator {
     public static final Method DEBUG_REPORT_METHOD = ReflectionHelper.getMethod(Debug.class, "report", Debuggable.class, String.class, Object[].class);
 
     public static class ArgData {
-        public Class type;
-        public Class subType;
-        public boolean required;
-        public String name;
-        public String defaultValue;
-        public Object defaultObject;
-        public int index;
-        public boolean isLinear;
-        public boolean getRaw;
-        public boolean shouldDebug;
-        public boolean shouldParse;
+        public final Class type;
+        public final Class subType;
+        public final boolean required;
+        public final String name;
+        public final String defaultValue;
+        public final Object defaultObject;
+        public final int index;
+        public final boolean isLinear;
+        public final boolean getRaw;
+        public final boolean shouldDebug;
+        public final boolean shouldParse;
+
+        public ArgData(Class type, Class subType, boolean required, String name, String defaultValue, Object defaultObject,
+                       int index, boolean isLinear, boolean getRaw, boolean shouldDebug, boolean shouldParse) {
+            this.type = type;
+            this.subType = subType;
+            this.required = required;
+            this.name = name;
+            this.defaultValue = defaultValue;
+            this.defaultObject = defaultObject;
+            this.index = index;
+            this.isLinear = isLinear;
+            this.getRaw = getRaw;
+            this.shouldDebug = shouldDebug;
+            this.shouldParse = shouldParse;
+        }
     }
 
     public static Argument getArgumentFor(ScriptEntry entry, ArgData arg) {
@@ -117,11 +132,16 @@ public class CommandExecutionGenerator {
         if (givenArg == null) {
             return (ObjectTag) arg.defaultObject;
         }
-        if (arg.getRaw && arg.type == ObjectTag.class && givenArg.hasPrefix() && givenArg.object instanceof ElementTag) {
+        ObjectTag object = givenArg.object;
+        if (arg.getRaw && arg.type == ObjectTag.class && givenArg.hasPrefix() && object instanceof ElementTag) {
             // The rule getElementForPrefix already applies for ElementTag params, extended to a plain ObjectTag one: with
             // '@ArgRaw', text that happens to contain a colon keeps the colon instead of being split into a prefix nobody
             // asked for. Restricted to ObjectTag itself because a narrower param type would fail the generated cast.
             return givenArg.getRawElement();
+        }
+        if (object != null && (arg.type == ObjectTag.class || object.getClass() == arg.type)) {
+            object.setPrefix(givenArg.prefix);
+            return object;
         }
         ObjectTag output = givenArg.asType(arg.type);
         if (output == null) {
@@ -367,65 +387,69 @@ public class CommandExecutionGenerator {
                         Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + param.getName() + "' which lacks a proper naming parameter.");
                         return null;
                     }
-                    ArgData argData = new ArgData();
-                    argData.shouldDebug = !param.isAnnotationPresent(ArgNoDebug.class);
-                    argData.getRaw = param.isAnnotationPresent(ArgRaw.class);
-                    argData.shouldParse = !param.isAnnotationPresent(ArgUnparsed.class);
-                    argData.subType = argSubType == null ? null : argSubType.value();
-                    argData.type = paramType;
-                    argData.name = argName.value();
+                    boolean shouldDebug = !param.isAnnotationPresent(ArgNoDebug.class);
+                    boolean getRaw = param.isAnnotationPresent(ArgRaw.class);
+                    boolean shouldParse = !param.isAnnotationPresent(ArgUnparsed.class);
+                    Class argSubTypeClass = argSubType == null ? null : argSubType.value();
+                    Class argType = paramType;
+                    String argRealName = argName.value();
+                    boolean required = false;
+                    String defaultValue = null;
+                    Object defaultObject = null;
+                    int argIndex = 0;
+                    boolean isLinear = false;
                     if (!param.isAnnotationPresent(ArgDefaultNull.class)) {
                         if (argDefaultText == null) {
-                            argData.required = true;
+                            required = true;
                         }
                         else {
-                            argData.defaultValue = argDefaultText.value();
+                            defaultValue = argDefaultText.value();
                             boolean needsConvert = true;
-                            if (ObjectTag.class.isAssignableFrom(argData.type)) {
-                                argData.defaultObject = new ElementTag(argData.defaultValue).asType(argData.type, CoreUtilities.noDebugContext);
+                            if (ObjectTag.class.isAssignableFrom(argType)) {
+                                defaultObject = new ElementTag(defaultValue).asType(argType, CoreUtilities.noDebugContext);
                             }
-                            else if (Enum.class.isAssignableFrom(argData.type)) {
-                                argData.defaultObject = EnumHelper.get(argData.type).valuesMapLower.get(EnumHelper.cleanKey(argData.defaultValue));
+                            else if (Enum.class.isAssignableFrom(argType)) {
+                                defaultObject = EnumHelper.get(argType).valuesMapLower.get(EnumHelper.cleanKey(defaultValue));
                             }
-                            else if (argData.type == List.class && argData.subType != null) {
-                                argData.defaultObject = ListTag.valueOf(argData.defaultValue, CoreUtilities.noDebugContext);
+                            else if (argType == List.class && argSubTypeClass != null) {
+                                defaultObject = ListTag.valueOf(defaultValue, CoreUtilities.noDebugContext);
                             }
                             else {
                                 needsConvert = false;
                             }
-                            if (needsConvert && argData.defaultObject == null) {
-                                Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argData.name
-                                        + "' which specifies default value '" + argData.defaultValue + "' which is a not a valid '" + DebugInternals.getClassNameOpti(argData.type) + "'");
+                            if (needsConvert && defaultObject == null) {
+                                Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argRealName
+                                        + "' which specifies default value '" + defaultValue + "' which is a not a valid '" + DebugInternals.getClassNameOpti(argType) + "'");
                                 return null;
                             }
                         }
                     }
-                    MethodGenerator.Local argLocal = gen.addLocal("arg_" + args.size() + "_" + CodeGenUtil.cleanName(argData.name), paramType);
+                    MethodGenerator.Local argLocal = gen.addLocal("arg_" + args.size() + "_" + CodeGenUtil.cleanName(argRealName), paramType);
                     Method argMethod = null;
                     boolean doCast = false;
                     if (argPrefixed != null || argLinear != null) {
                         if (argPrefixed != null) {
-                            argData.index = cmd.setPrefixHandled(argData.name);
+                            argIndex = cmd.setPrefixHandled(argRealName);
                         }
                         else {
                             if (cmd.generatorInfiniteArgs) {
-                                Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argData.name + "' which is linear, after an unlimited linear arg.");
+                                Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argRealName + "' which is linear, after an unlimited linear arg.");
                                 return null;
                             }
-                            argData.index = cmd.linearHandledCount++;
-                            argData.isLinear = true;
+                            argIndex = cmd.linearHandledCount++;
+                            isLinear = true;
                         }
-                        if (argData.isLinear && paramType == List.class && !argData.shouldParse && argData.subType == null) {
+                        if (isLinear && paramType == List.class && !shouldParse && argSubTypeClass == null) {
                             cmd.generatorInfiniteArgs = true;
                             argMethod = HELPER_GET_UNPARSED_ARG_LIST;
                         }
-                        else if (paramType == String.class && !argData.isLinear && !argData.shouldParse) {
+                        else if (paramType == String.class && !isLinear && !shouldParse) {
                             argMethod = HELPER_PREFIX_UNPARSED_METHOD;
                         }
-                        else if (paramType == List.class && argData.subType != null && ObjectTag.class.isAssignableFrom(argData.subType)) {
+                        else if (paramType == List.class && argSubTypeClass != null && ObjectTag.class.isAssignableFrom(argSubTypeClass)) {
                             argMethod = HELPER_PREFIX_LIST_OBJECT_METHOD;
                         }
-                        else if (paramType == List.class && argData.subType != null && Enum.class.isAssignableFrom(argData.subType)) {
+                        else if (paramType == List.class && argSubTypeClass != null && Enum.class.isAssignableFrom(argSubTypeClass)) {
                             argMethod = HELPER_PREFIX_LIST_ENUM_METHOD;
                         }
                         else if (paramType == ElementTag.class) {
@@ -460,29 +484,30 @@ public class CommandExecutionGenerator {
                     }
                     else if (paramType == boolean.class) {
                         argMethod = HELPER_BOOLEAN_ARG_METHOD;
-                        argData.index = cmd.setBooleanHandled(argData.name);
+                        argIndex = cmd.setBooleanHandled(argRealName);
                     }
                     else if (Enum.class.isAssignableFrom(paramType)) {
                         argMethod = HELPER_ENUM_ARG_METHOD;
-                        argData.index = cmd.setEnumHandled(argData.name, (Class<? extends Enum>) paramType);
+                        argIndex = cmd.setEnumHandled(argRealName, (Class<? extends Enum>) paramType);
                         doCast = true;
                     }
                     else {
-                        Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argData.name + "' which does not have a valid order specifier (Linear, Prefixed, ...).");
+                        Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argRealName + "' which does not have a valid order specifier (Linear, Prefixed, ...).");
                         return null;
                     }
                     if (argMethod == null) {
-                        Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argData.name + "' of type '" + paramType.getName() + "' which is not supported.");
+                        Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argRealName + "' of type '" + paramType.getName() + "' which is not supported.");
                         return null;
                     }
                     gen.loadLocal(scriptEntryLocal);
-                    gen.loadStaticField(className, argLocal.name, argData.getClass());
+                    gen.loadStaticField(className, argLocal.name, ArgData.class);
                     gen.invokeStatic(argMethod);
                     if (doCast) {
                         gen.cast(paramType);
                     }
                     gen.storeLocal(argLocal);
                     argLocals.add(argLocal);
+                    ArgData argData = new ArgData(argType, argSubTypeClass, required, argRealName, defaultValue, defaultObject, argIndex, isLinear, getRaw, shouldDebug, shouldParse);
                     args.add(argData);
                 }
                 gen.advanceAndLabel();
@@ -526,14 +551,14 @@ public class CommandExecutionGenerator {
                 gen.end();
             }
             for (int i = 0; i < argLocals.size(); i++) {
-                cw.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC, argLocals.get(i).name, Type.getDescriptor(args.get(i).getClass()), null, null);
+                cw.visitField(Opcodes.ACC_PUBLIC | Opcodes.ACC_STATIC | Opcodes.ACC_FINAL, argLocals.get(i).name, Type.getDescriptor(args.get(i).getClass()), null, null);
             }
             // ====== Compile and return ======
             cw.visitEnd();
             byte[] compiled = cw.toByteArray();
             Class<?> generatedClass = CodeGenUtil.loader.define(className.replace('/', '.'), compiled);
             for (int i = 0; i < argLocals.size(); i++) {
-                ReflectionHelper.setFieldValue(generatedClass, argLocals.get(i).name, null, args.get(i));
+                ReflectionHelper.getFinalSetter(generatedClass, argLocals.get(i).name).invoke(args.get(i));
             }
             CommandExecutor result = (CommandExecutor) generatedClass.getConstructors()[0].newInstance();
             result.args = args.toArray(new ArgData[0]);
