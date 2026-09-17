@@ -225,15 +225,12 @@ public class ForeachCommand extends BracedCommand {
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
             if (datum.keys != null) {
                 datum.keyCell = new LoopValue.Cell(new ElementTag(datum.keys.get(0)));
-                queue.addDefinitionSlot(datum.slotTable, datum.keySlot, datum.keyHolder, datum.keyCell);
-                datum.keyCell.installed = true;
+                datum.keyCell.installed = queue.installLoopHolder(datum.slotTable, datum.keySlot, datum.keyHolder, datum.keyCell);
             }
             datum.valueCell = new LoopValue.Cell(datum.list.getObject(0));
-            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.valueCell);
-            datum.valueCell.installed = true;
+            datum.valueCell.installed = queue.installLoopHolder(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.valueCell);
             datum.indexCounter = new LoopValue.Counter(1);
-            queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, datum.indexCounter);
-            datum.indexCounter.installed = true;
+            datum.indexCounter.installed = queue.installLoopHolder(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, datum.indexCounter);
         }
     }
 
@@ -252,20 +249,17 @@ public class ForeachCommand extends BracedCommand {
         }
         data.indexCounter.value = data.index;
         if (!data.indexCounter.installed) {
-            queue.addDefinitionSlot(data.slotTable, data.indexSlot, ScriptQueue.LOOP_INDEX_KEY, data.indexCounter);
-            data.indexCounter.installed = true;
+            data.indexCounter.installed = queue.installLoopHolder(data.slotTable, data.indexSlot, ScriptQueue.LOOP_INDEX_KEY, data.indexCounter);
         }
         if (data.keys != null) {
             data.keyCell.value = new ElementTag(data.keys.get(data.index - 1));
             if (!data.keyCell.installed) {
-                queue.addDefinitionSlot(data.slotTable, data.keySlot, data.keyHolder, data.keyCell);
-                data.keyCell.installed = true;
+                data.keyCell.installed = queue.installLoopHolder(data.slotTable, data.keySlot, data.keyHolder, data.keyCell);
             }
         }
         data.valueCell.value = data.list.getObject(data.index - 1);
         if (!data.valueCell.installed) {
-            queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, data.valueCell);
-            data.valueCell.installed = true;
+            data.valueCell.installed = queue.installLoopHolder(data.slotTable, data.valueSlot, data.valueHolder, data.valueCell);
         }
         return true;
     };

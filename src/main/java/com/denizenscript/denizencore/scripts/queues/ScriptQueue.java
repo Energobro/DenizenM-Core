@@ -192,12 +192,13 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             frame.owner.setSendingQueue(this);
             frame.owner.updateContext();
         }
-        CommandExecutor.QueueState queueState = CommandExecutor.currentQueueState();
+        // The queue is already this one: revolve, revolveOnceForce and runNow are the only ways in here, and every one of them
+        // runs inside enterQueue(this). Setting it again would cost a thread-state lookup on every single turn of every loop
+        // to write back the value already there. Only the debug context still has to be swapped, as errors and the loop's own
+        // header line belong to the loop's owner rather than to the last entry that ran.
         Debug.ThreadState debugState = Debug.currentState();
-        ScriptQueue priorQueue = queueState.queue;
         TagContext priorContext = debugState.context;
         try {
-            queueState.queue = this;
             debugState.context = frame.owner.getContext();
             if (!frame.handler.next(this, frame.owner)) {
                 return false;
@@ -211,7 +212,6 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             return false;
         }
         finally {
-            queueState.queue = priorQueue;
             debugState.context = priorContext;
         }
     }
@@ -469,6 +469,23 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         definitions.putDeepObject(path, value);
     }
 
+    /**
+     * Installs a loop's own mutable holder under a definition name, and reports whether the holder really ended up stored there.
+     * <p>
+     * A '__'-prefixed name is not a definition at all: the implementation reads the value, applies it as a queue link (the player or
+     * NPC a queue runs as), and stores nothing. A loop that then mutates its holder in place would set that link from the first
+     * element of the list and never again, so such a name gets the resolved value written instead, and 'false' is returned to say
+     * the write has to be repeated on every iteration.
+     */
+    public boolean installLoopHolder(DefinitionSlots table, int slot, StringHolder definition, LoopValue holder) {
+        if (definition.str.startsWith("__")) {
+            addDefinition(definition, holder.resolve());
+            return false;
+        }
+        addDefinitionSlot(table, slot, definition, holder);
+        return true;
+    }
+
     public static TagManager.SlotBinding bindingFor(DefinitionSlots table, TagManager.SlotBinding existing, StringHolder definition) {
         if (existing != null && existing.table == table) {
             return existing;
@@ -504,6 +521,17 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             return getDefinitionObject(definition);
         }
         return definitions.getSlot(table, binding.slot, definition);
+    }
+
+    public void addDefinitionPlain(DefinitionSlots table, int slot, StringHolder definition, ObjectTag value) {
+        if (trackedDefinitionWrites != null) {
+            trackedDefinitionWrites.add(definition.str);
+        }
+        if (table == null || slot == DefinitionSlots.NO_SLOT) {
+            definitions.putObject(definition, value);
+            return;
+        }
+        definitions.putSlot(table, slot, definition, value);
     }
 
     public void addDefinitionSlot(DefinitionSlots table, int slot, StringHolder definition, ObjectTag value) {
@@ -699,13 +727,19 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     public final void runNow(List<ScriptEntry> entries) {
         int baseSize = getQueueSize(), baseFrames = loopFrames == null ? 0 : loopFrames.size();
         injectEntriesAtStart(entries);
-        while (getQueueSize() > baseSize || (loopFrames != null && loopFrames.size() > baseFrames)) {
-            ScriptEntry next = peekPending();
-            if (next != null) {
-                next.setInstant(true);
+        ScriptQueue prior = ScriptEngine.enterQueue(this);
+        try {
+            while (getQueueSize() > baseSize || (loopFrames != null && loopFrames.size() > baseFrames)) {
+                ScriptEntry next = peekPending();
+                if (next != null) {
+                    next.setInstant(true);
+                }
+                holdingOn = null;
+                ScriptEngine.revolveOnceForce(this);
             }
-            holdingOn = null;
-            ScriptEngine.revolveOnceForce(this);
+        }
+        finally {
+            ScriptEngine.leaveQueue(prior);
         }
     }
 
@@ -763,6 +797,36 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     public final ScriptEntry getNext() {
+        ArrayList<LoopFrame> frames = loopFrames;
+        if (frames != null && !frames.isEmpty()) {
+            LoopFrame frame = frames.get(frames.size() - 1);
+            if (script_entries.size() == frame.tailSize) {
+                if (frame.pointer < frame.body.size()) {
+                    ScriptEntry entry = frame.body.get(frame.pointer++);
+                    entry.resetForReuse();
+                    return entry;
+                }
+                // The body is spent, so decide on another turn right here. This used to fall through to getNextAcrossFrames,
+                // which re-read the frame, the queue length and the pointer from scratch - and then again after the iteration.
+                // A body of one line pays that on EVERY turn, because the fast path above serves exactly one entry per turn.
+                if (runLoopIteration(frame)) {
+                    if (script_entries.size() == frame.tailSize && frame.pointer < frame.body.size()) {
+                        ScriptEntry entry = frame.body.get(frame.pointer++);
+                        entry.resetForReuse();
+                        return entry;
+                    }
+                }
+                else {
+                    // The loop is over. Dropped here rather than below so that the shared walk never runs the iteration twice.
+                    frames.remove(frames.size() - 1);
+                }
+            }
+            return getNextAcrossFrames();
+        }
+        return script_entries.isEmpty() ? null : script_entries.removeFirst();
+    }
+
+    private ScriptEntry getNextAcrossFrames() {
         while (loopFrames != null && !loopFrames.isEmpty()) {
             LoopFrame frame = loopFrames.get(loopFrames.size() - 1);
             int size = script_entries.size();
@@ -950,15 +1014,48 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
      */
     public final void forEachPendingEntry(Consumer<ScriptEntry> action) {
         for (ScriptEntry entry : script_entries) {
-            action.accept(entry);
+            visitPending(entry, action);
         }
         if (loopFrames != null) {
             for (int i = 0; i < loopFrames.size(); i++) {
                 LoopFrame frame = loopFrames.get(i);
                 action.accept(frame.owner);
                 frame.owner.updateContext();
+                // The owner's own held body is this frame's body, so walking the frame covers it - hence 'accept' above rather than 'visitPending'.
                 for (int j = 0; j < frame.body.size(); j++) {
-                    action.accept(frame.body.get(j));
+                    visitPending(frame.body.get(j), action);
+                }
+            }
+        }
+    }
+
+    /**
+     * Applies the action to one entry and to every block body that entry is holding for reuse.
+     * <p>
+     * A block's body is cloned once and kept on the entry that owns it ({@link ScriptEntry#inlinedBody} and, for an if/else chain,
+     * {@link ScriptEntry#inlinedBranches}) rather than rebuilt per turn. On the second and later turns of an enclosing loop those
+     * clones are the entries that will actually run, and until the block is entered again they hang off that one entry - reachable
+     * from neither the queue nor any loop frame. An action that rewrites what pending entries run as has to reach them there, or a
+     * nested block keeps running against the value its first turn was built with.
+     */
+    private static void visitPending(ScriptEntry entry, Consumer<ScriptEntry> action) {
+        action.accept(entry);
+        List<ScriptEntry> body = entry.inlinedBody;
+        if (body != null) {
+            for (int i = 0; i < body.size(); i++) {
+                visitPending(body.get(i), action);
+            }
+        }
+        List<List<ScriptEntry>> branches = entry.inlinedBranches;
+        if (branches != null) {
+            for (int i = 0; i < branches.size(); i++) {
+                // The list is indexed by branch number and padded with nulls, so a branch that has not been taken yet is a hole.
+                List<ScriptEntry> branch = branches.get(i);
+                if (branch == null) {
+                    continue;
+                }
+                for (int j = 0; j < branch.size(); j++) {
+                    visitPending(branch.get(j), action);
                 }
             }
         }

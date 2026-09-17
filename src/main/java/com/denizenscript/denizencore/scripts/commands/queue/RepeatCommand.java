@@ -171,8 +171,7 @@ public class RepeatCommand extends BracedCommand {
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
             datum.counter = new LoopValue.Counter(datum.index);
-            queue.addDefinitionSlot(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.counter);
-            datum.counter.installed = true;
+            datum.counter.installed = queue.installLoopHolder(datum.slotTable, datum.valueSlot, datum.valueHolder, datum.counter);
         }
     }
 
@@ -191,8 +190,7 @@ public class RepeatCommand extends BracedCommand {
         }
         data.counter.value = data.index;
         if (!data.counter.installed) {
-            queue.addDefinitionSlot(data.slotTable, data.valueSlot, data.valueHolder, data.counter);
-            data.counter.installed = true;
+            data.counter.installed = queue.installLoopHolder(data.slotTable, data.valueSlot, data.valueHolder, data.counter);
         }
         return true;
     };

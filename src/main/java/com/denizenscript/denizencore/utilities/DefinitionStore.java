@@ -5,6 +5,7 @@ import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.Arrays;
+import java.util.List;
 
 public class DefinitionStore {
 
@@ -35,6 +36,22 @@ public class DefinitionStore {
         }
     }
 
+    /**
+     * Replaces a loop's holder with the value it stands for, so that a write walking through this key sees the real object.
+     * <p>
+     * A deep write ('define x.y z') has to descend into whatever 'x' holds, and a holder is not a MapTag - {@link MapTag#putDeepObject}
+     * would take it for a non-map and swap the whole thing for a fresh empty one, losing the loop's value for the rest of the turn.
+     * Resolving it in place first makes the write land inside that value, which is what it did before loops held their value in a box.
+     * The holder is disarmed by the same step, so the loop re-installs it on its next turn.
+     */
+    private void materializeHolder(StringHolder key) {
+        ObjectTag existing = map.getObject(key);
+        if (existing instanceof LoopValue holder) {
+            holder.installed = false;
+            map.map.put(key, holder.resolve());
+        }
+    }
+
     private void resolveInPlace() {
         for (java.util.Map.Entry<StringHolder, ObjectTag> entry : map.map.entrySet()) {
             if (entry.getValue() instanceof LoopValue holder) {
@@ -45,15 +62,39 @@ public class DefinitionStore {
     }
 
     public ObjectTag getDeepObject(String key) {
-        return map.getDeepObject(key);
+        if (!CoreUtilities.contains(key, '.')) {
+            return getObject(new StringHolder(key));
+        }
+        List<String> subkeys = CoreUtilities.split(key, '.');
+        ObjectTag current = getObject(new StringHolder(subkeys.get(0)));
+        for (int i = 1; i < subkeys.size(); i++) {
+            if (!(current instanceof MapTag subMap)) {
+                return null;
+            }
+            current = subMap.getObject(subkeys.get(i));
+            if (current == null) {
+                return null;
+            }
+        }
+        return current;
     }
 
     public ObjectTag getDeepObject(StringHolder[] path) {
-        return map.getDeepObject(path);
+        ObjectTag current = getObject(path[0]);
+        for (int i = 1; i < path.length; i++) {
+            if (!(current instanceof MapTag subMap)) {
+                return null;
+            }
+            current = subMap.getObject(path[i]);
+            if (current == null) {
+                return null;
+            }
+        }
+        return current;
     }
 
     public void putDeepObject(StringHolder[] path, ObjectTag value) {
-        disarm(map.getObject(path[0]));
+        materializeHolder(path[0]);
         map.putDeepObject(path, value);
         invalidate(path[0].low);
     }
@@ -71,7 +112,7 @@ public class DefinitionStore {
 
     public void putDeepObject(String key, ObjectTag value) {
         int dotAt = key.indexOf('.');
-        disarm(map.getObject(new StringHolder(dotAt == -1 ? key : key.substring(0, dotAt))));
+        materializeHolder(new StringHolder(dotAt == -1 ? key : key.substring(0, dotAt)));
         map.putDeepObject(key, value);
         if (table != null) {
             int dot = key.indexOf('.');

@@ -138,6 +138,10 @@ public class MapTag implements ObjectTag {
         this.map = new LinkedHashMap<>();
     }
 
+    public MapTag(int capacity) {
+        this.map = new LinkedHashMap<>(capacity * 4 / 3 + 2);
+    }
+
     public MapTag(Map<StringHolder, ObjectTag> map) {
         this.map = new LinkedHashMap<>(map);
     }
@@ -148,7 +152,7 @@ public class MapTag implements ObjectTag {
 
     @Override
     public MapTag duplicate() {
-        MapTag newMap = new MapTag();
+        MapTag newMap = new MapTag(map.size());
         for (Map.Entry<StringHolder, ObjectTag> entry : entrySet()) {
             newMap.putObject(entry.getKey(), entry.getValue().duplicate());
         }
@@ -524,12 +528,13 @@ public class MapTag implements ObjectTag {
                 attribute.echoError("Must have input to filter_tag[...]");
                 return null;
             }
-            MapTag newMap = new MapTag();
+            MapTag newMap = new MapTag(object.size());
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(attribute.context.definitionProvider);
+            StringHolder filterKeyStr = StringHolder.ofLowered("filter_key"), filterValueStr = StringHolder.ofLowered("filter_value");
             try {
                 for (Map.Entry<StringHolder, ObjectTag> entry : object.entrySet()) {
-                    provider.altDefs.putObject("filter_key", new ElementTag(entry.getKey().str));
-                    provider.altDefs.putObject("filter_value", entry.getValue());
+                    provider.putOverride(filterKeyStr, new ElementTag(entry.getKey().str));
+                    provider.putOverride(filterValueStr, entry.getValue());
                     if (CoreUtilities.equalsIgnoreCase(attribute.parseDynamicParam(provider).toString(), "true")) {
                         newMap.putObject(entry.getKey(), entry.getValue());
                     }
@@ -556,12 +561,13 @@ public class MapTag implements ObjectTag {
                 attribute.echoError("Must have input to parse_value_tag[...]");
                 return null;
             }
-            MapTag newMap = new MapTag();
+            MapTag newMap = new MapTag(object.size());
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(attribute.context.definitionProvider);
+            StringHolder parseKeyStr = StringHolder.ofLowered("parse_key"), parseValueStr = StringHolder.ofLowered("parse_value");
             try {
                 for (Map.Entry<StringHolder, ObjectTag> entry : object.entrySet()) {
-                    provider.altDefs.putObject("parse_key", new ElementTag(entry.getKey().str));
-                    provider.altDefs.putObject("parse_value", entry.getValue());
+                    provider.putOverride(parseKeyStr, new ElementTag(entry.getKey().str));
+                    provider.putOverride(parseValueStr, entry.getValue());
                     newMap.putObject(entry.getKey(), attribute.parseDynamicParam(provider));
                 }
             }
@@ -678,7 +684,7 @@ public class MapTag implements ObjectTag {
         // - narrate <map[a=1;b=2;c=3].get_subset[b|a]>
         // -->
         tagProcessor.registerStaticTag(MapTag.class, ListTag.class, "get_subset", (attribute, object, keys) -> {
-            MapTag output = new MapTag();
+            MapTag output = new MapTag(keys.size());
             for (String key : keys) {
                 StringHolder keyHolder = new StringHolder(key);
                 ObjectTag value = object.getObject(keyHolder);

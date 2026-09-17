@@ -37,6 +37,17 @@ public class ScriptEngine {
         scriptEntry.updateContext();
     }
 
+    public static ScriptQueue enterQueue(ScriptQueue scriptQueue) {
+        CommandExecutor.QueueState state = CommandExecutor.currentQueueState();
+        ScriptQueue prior = state.queue;
+        state.queue = scriptQueue;
+        return prior;
+    }
+
+    public static void leaveQueue(ScriptQueue prior) {
+        CommandExecutor.currentQueueState().queue = prior;
+    }
+
     public static void revolveOnceForce(ScriptQueue scriptQueue) {
         ScriptEntry scriptEntry = scriptQueue.getNext();
         if (scriptEntry == null) {

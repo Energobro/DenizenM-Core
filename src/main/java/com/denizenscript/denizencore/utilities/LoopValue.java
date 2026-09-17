@@ -34,6 +34,21 @@ public abstract class LoopValue implements ObjectTag {
         return resolve().setPrefix(prefix);
     }
 
+    /**
+     * Both of these default to returning 'this', which for a holder that a loop rewrites every turn would hand a live
+     * reference to whatever asked - and a stored one would then change under the script. Delegated rather than left to
+     * the default so that a read path that forgets to resolve gets the value, not the box.
+     */
+    @Override
+    public ObjectTag duplicate() {
+        return resolve().duplicate();
+    }
+
+    @Override
+    public ObjectTag refreshState() {
+        return resolve().refreshState();
+    }
+
     @Override
     public String toString() {
         return identify();

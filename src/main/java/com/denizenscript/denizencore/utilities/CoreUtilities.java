@@ -32,7 +32,9 @@ import java.security.MessageDigest;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.*;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Function;
+import java.util.regex.Pattern;
 
 public class CoreUtilities {
 
@@ -239,6 +241,116 @@ public class CoreUtilities {
         return output.toString();
     }
 
+    private static final ConcurrentHashMap<String, Pattern> compiledPatterns = new ConcurrentHashMap<>(), compiledPatternsIgnoreCase = new ConcurrentHashMap<>();
+
+    public static Pattern regexPattern(String regex, boolean ignoreCase) {
+        ConcurrentHashMap<String, Pattern> cache = ignoreCase ? compiledPatternsIgnoreCase : compiledPatterns;
+        Pattern result = cache.get(regex);
+        if (result == null) {
+            result = ignoreCase ? Pattern.compile(regex, Pattern.CASE_INSENSITIVE) : Pattern.compile(regex);
+            if (cache.size() > 512) {
+                cache.clear();
+            }
+            cache.put(regex, result);
+        }
+        return result;
+    }
+
+    public static int indexOfIgnoreCase(String text, String findMe, int from) {
+        int max = text.length() - findMe.length();
+        int len = findMe.length();
+        outer:
+        for (int i = Math.max(from, 0); i <= max; i++) {
+            for (int j = 0; j < len; j++) {
+                char a = text.charAt(i + j), b = findMe.charAt(j);
+                if (a != b) {
+                    if (a >= 'A' && a <= 'Z') {
+                        a += 32;
+                    }
+                    if (b >= 'A' && b <= 'Z') {
+                        b += 32;
+                    }
+                    if (a != b) {
+                        continue outer;
+                    }
+                }
+            }
+            return i;
+        }
+        return -1;
+    }
+
+    public static String replaceIgnoreCase(String original, String findMe, String swapMeIn) {
+        int index = indexOfIgnoreCase(original, findMe, 0);
+        if (index == -1) {
+            return original;
+        }
+        StringBuilder output = new StringBuilder(original.length());
+        int prevIndex = 0;
+        while (index != -1) {
+            output.append(original, prevIndex, index).append(swapMeIn);
+            prevIndex = index + findMe.length();
+            index = indexOfIgnoreCase(original, findMe, prevIndex);
+        }
+        output.append(original, prevIndex, original.length());
+        return output.toString();
+    }
+
+    /**
+     * As {@code String.split} for a separator taken literally rather than as a regex.
+     * <p>
+     * The early return is what String.split does with text the separator never appears in: it comes back whole, as one piece, and
+     * the trailing-empty trim below does not apply to it. That matters for the empty string, which stays a list of one empty entry.
+     */
+    public static List<String> splitLiteral(String text, String separator, int limit) {
+        int index = text.indexOf(separator);
+        if (index == -1) {
+            List<String> single = new ArrayList<>(1);
+            single.add(text);
+            return single;
+        }
+        List<String> result = new ArrayList<>();
+        int start = 0;
+        while (index != -1 && (limit <= 0 || result.size() < limit - 1)) {
+            result.add(text.substring(start, index));
+            start = index + separator.length();
+            index = text.indexOf(separator, start);
+        }
+        result.add(text.substring(start));
+        if (limit == 0) {
+            int size = result.size();
+            while (size > 0 && result.get(size - 1).isEmpty()) {
+                result.remove(--size);
+            }
+        }
+        return result;
+    }
+
+    /** As {@link #splitLiteral}, matching the separator without regard to case. */
+    public static List<String> splitIgnoreCase(String text, String separator, int limit) {
+        int index = indexOfIgnoreCase(text, separator, 0);
+        if (index == -1) {
+            List<String> single = new ArrayList<>(1);
+            single.add(text);
+            return single;
+        }
+        List<String> result = new ArrayList<>();
+        int start = 0;
+        while (index != -1 && (limit <= 0 || result.size() < limit - 1)) {
+            result.add(text.substring(start, index));
+            start = index + separator.length();
+            index = indexOfIgnoreCase(text, separator, start);
+        }
+        result.add(text.substring(start));
+        if (limit == 0) {
+            int size = result.size();
+            while (size > 0 && result.get(size - 1).isEmpty()) {
+                result.remove(--size);
+            }
+        }
+        return result;
+    }
+
     public static String join(String delim, List objects) {
         StringBuilder output = new StringBuilder(objects.size() * 5);
         for (int i = 0; i < objects.size(); i++) {
@@ -299,7 +411,7 @@ public class CoreUtilities {
             Property prop = specificGetter.get(object);
             if (prop == null) {
                 String propName = properties.propertyNamesByTag.get(tagName);
-                attribute.seemingSuccesses.add(attribute.getAttributeWithoutParam(1) + " - property " + propName + " matched, but is not valid for the object.");
+                attribute.addSeemingSuccess(attribute.getAttributeWithoutParam(1) + " - property " + propName + " matched, but is not valid for the object.");
                 return null;
             }
             return prop.getObjectAttribute(attribute);
@@ -612,9 +724,14 @@ public class CoreUtilities {
                 first = i;
                 break;
             }
-            else if (c > 128 && Character.isLowerCase(c)) {
-                mustUseString = true;
-                break;
+            else if (c > 128) {
+                if ((c >= 0x400 && c <= 0x42F) || (c >= 0xC0 && c <= 0xDE)) {
+                    continue;
+                }
+                if ((c >= 0x430 && c <= 0x45F) || (c >= 0xDF && c <= 0xFF) || Character.isLowerCase(c)) {
+                    mustUseString = true;
+                    break;
+                }
             }
         }
         if (mustUseString) {
@@ -643,9 +760,14 @@ public class CoreUtilities {
                 first = i;
                 break;
             }
-            else if (c > 128 && Character.isUpperCase(c)) {
-                mustUseString = true;
-                break;
+            else if (c > 128) {
+                if ((c >= 0x430 && c <= 0x45F) || (c >= 0xDF && c <= 0xFF)) {
+                    continue;
+                }
+                if ((c >= 0x400 && c <= 0x42F) || (c >= 0xC0 && c <= 0xDE) || Character.isUpperCase(c)) {
+                    mustUseString = true;
+                    break;
+                }
             }
         }
         if (mustUseString) {

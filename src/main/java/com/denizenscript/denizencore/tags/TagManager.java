@@ -418,14 +418,15 @@ public class TagManager {
                         return definition.refreshState();
                     }
                     Attribute attribute = new Attribute(data.attribs, context.entry, context, data.skippable);
-                    TagContext lastContext = Debug.getCurrentContext();
-                    Debug.setCurrentContext(context);
+                    Debug.ThreadState debugState = Debug.currentState();
+                    TagContext lastContext = debugState.context;
+                    debugState.context = context;
                     ObjectTag result;
                     try {
                         result = CoreUtilities.fixType(definition, attribute.context).getObjectAttribute(attribute.fulfill(1));
                     }
                     finally {
-                        Debug.setCurrentContext(lastContext);
+                        debugState.context = lastContext;
                     }
                     if (result != null) {
                         return result;
@@ -445,8 +446,9 @@ public class TagManager {
         if (CoreConfiguration.debugVerbose) {
             Debug.log("Tag read: " + event.raw_tag + ", " + tT + "...");
         }
-        TagContext last = Debug.getCurrentContext();
-        Debug.setCurrentContext(context);
+        Debug.ThreadState debugState = Debug.currentState();
+        TagContext last = debugState.context;
+        debugState.context = context;
         try {
             // Note: the timeout mechanism hands the tag to a helper thread and marks that thread as "the" tag thread, which is only meaningful for the main thread.
             // Tags read from an async queue simply run in place - they can't freeze the server anyway.
@@ -462,7 +464,7 @@ public class TagManager {
             return event.getReplacedObj();
         }
         finally {
-            Debug.setCurrentContext(last);
+            debugState.context = last;
         }
     }
 
@@ -491,7 +493,7 @@ public class TagManager {
                 if (attribute.lastValid != null) {
                     Debug.echoError(context, "The returned value from initial tag fragment '<LG>" + attribute.filledString() + "<W>' was: '<LG>" + attribute.lastValid.debuggable() + "<W>'.");
                 }
-                if (attribute.seemingSuccesses.size() > 0) {
+                if (attribute.seemingSuccesses != null && !attribute.seemingSuccesses.isEmpty()) {
                     String almost = attribute.seemingSuccesses.get(attribute.seemingSuccesses.size() - 1);
                     if (attribute.hasContextFailed) {
                         Debug.echoError(context, "Almost matched but failed (missing [context] parameter?): " + almost);

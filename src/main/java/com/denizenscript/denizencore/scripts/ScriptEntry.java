@@ -94,6 +94,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
         public byte shouldDebugState = 0;
 
+        public Boolean shouldDebugBool = null;
+
         public int defObjects = 8;
 
         /** If set, this internal data set is privately owned by that one ScriptEntry (for off-thread execution), rather than shared between clones. */
@@ -146,6 +148,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             result.enumVals = enumVals == null ? null : enumVals.clone();
             result.booleans = booleans == null ? null : booleans.clone();
             result.shouldDebugState = shouldDebugState;
+            result.shouldDebugBool = shouldDebugBool;
             result.defObjects = defObjects;
             result.asyncBlockMaxNanos = asyncBlockMaxNanos;
             if (preprocArgs != null) {
@@ -1044,6 +1047,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
     // DEBUGGABLE
     /////////
 
+    public boolean debugThisLine = false;
+
     public boolean dbCallShouldDebug() {
         if (CoreConfiguration.debugOverride) {
             return true;
@@ -1056,6 +1061,10 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
     @Override
     public boolean shouldDebug() {
+        Boolean override = internal.shouldDebugBool;
+        if (override != null) {
+            return override;
+        }
         byte state = internal.shouldDebugState;
         return state != 0 ? state == 1 : computeShouldDebug();
     }

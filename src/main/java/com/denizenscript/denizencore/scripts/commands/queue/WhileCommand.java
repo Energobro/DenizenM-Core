@@ -216,8 +216,7 @@ public class WhileCommand extends BracedCommand {
             scriptEntry.setInstant(true);
             queue.pushLoopFrame(scriptEntry, bracedCommandsList, ITERATION);
             datum.indexCounter = new LoopValue.Counter(1);
-            queue.addDefinitionSlot(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, datum.indexCounter);
-            datum.indexCounter.installed = true;
+            datum.indexCounter.installed = queue.installLoopHolder(datum.slotTable, datum.indexSlot, ScriptQueue.LOOP_INDEX_KEY, datum.indexCounter);
         }
     }
 }

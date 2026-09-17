@@ -17,6 +17,8 @@ import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 import com.denizenscript.denizencore.utilities.debugging.Debuggable;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -178,22 +180,40 @@ public class ScriptContainer implements Debuggable {
         return ScriptHelper.getSource(getName());
     }
 
+    private String relativeFileName;
+
     public String getRelativeFileName() {
+        if (relativeFileName != null) {
+            return relativeFileName;
+        }
         try {
             String fn = getFileName();
             if (fn == null) {
                 return "(Error: script source is missing?)";
             }
-            fn = fn.replace(DenizenCore.implementation.getScriptFolder().getParentFile().getCanonicalPath(), "");
+            fn = fn.replace(scriptFolderRoot(), "");
             while (fn.startsWith("/")) {
                 fn = fn.substring(1);
             }
-            return fn;
+            return relativeFileName = fn;
         }
         catch (Exception e) {
             Debug.echoError(e);
             return getFileName();
         }
+    }
+
+    private static File scriptFolderRootSource;
+
+    private static String scriptFolderRootPath;
+
+    private static String scriptFolderRoot() throws IOException {
+        File folder = DenizenCore.implementation.getScriptFolder();
+        if (folder != scriptFolderRootSource) {
+            scriptFolderRootPath = folder.getParentFile().getCanonicalPath();
+            scriptFolderRootSource = folder;
+        }
+        return scriptFolderRootPath;
     }
 
     public String getOriginalName() {

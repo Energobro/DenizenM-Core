@@ -3,6 +3,8 @@ package com.denizenscript.denizencore.utilities.debugging;
 import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
+import com.denizenscript.denizencore.scripts.commands.CommandExecutor;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.scripts.containers.ScriptContainer;
 import com.denizenscript.denizencore.tags.TagContext;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
@@ -15,10 +17,10 @@ public class Debug {
     public static StringBuilder debugRecording = new StringBuilder();
 
     /**
-     * One thread's current context, for error handling.
+     * One thread's context override, for error handling. Null means the context is worked out from the running queue.
      * <p>
      * Held in a box rather than in the ThreadLocal directly so that a caller doing several operations - read the old one, install its own,
-     * put the old one back - pays for one thread lookup instead of three. That sequence runs on every command and on every sub-tagged tag read,
+     * put the old one back - pays for one thread lookup instead of three. That sequence runs on every sub-tagged tag read,
      * so off the main thread it was the single biggest difference between an async queue and the main one.
      */
     public static final class ThreadState {
@@ -37,7 +39,16 @@ public class Debug {
 
     /** Gets the current context of the calling thread, for error handling. */
     public static TagContext getCurrentContext() {
-        return currentState().context;
+        TagContext override = currentState().context;
+        if (override != null) {
+            return override;
+        }
+        ScriptQueue queue = CommandExecutor.getCurrentQueue();
+        if (queue == null) {
+            return null;
+        }
+        ScriptEntry entry = queue.getLastEntryExecuted();
+        return entry == null ? null : entry.getContext();
     }
 
     /** Sets the current context of the calling thread, for error handling. */

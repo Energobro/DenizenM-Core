@@ -146,7 +146,7 @@ public class ScriptUtilities {
                     name = name.substring(0, squareBracket).trim();
                 }
                 queue.addDefinition(name, definition);
-                if (debugDefinitions != null && debugDefinitions.shouldDebug()) {
+                if (shouldDebugDefinition(debugDefinitions, container, name)) {
                     Debug.echoDebug(debugDefinitions, "Adding definition '" + name + "' as " + definition);
                 }
                 x++;
@@ -209,5 +209,19 @@ public class ScriptUtilities {
      */
     public static ParseableTag textToTag(String taggedText, TagContext context) {
         return TagManager.parseTextToTag(taggedText, context);
+    }
+
+    /**
+     * Whether one definition handed to a starting queue is worth a debug line.
+     * <p>
+     * Two things are deliberately excluded. A script that turned its own debug off gets none of these lines even when the
+     * caller is being debugged - the definitions belong to the script being started, so that is whose setting decides. And a
+     * '__'-prefixed name is engine state rather than a script's own variable: '__save_entries' in particular carries every
+     * saved entry, which for something like a web request is a screenful of headers and a binary body.
+     */
+    public static boolean shouldDebugDefinition(Debuggable debugWith, ScriptContainer target, String name) {
+        return debugWith != null && debugWith.shouldDebug()
+                && (target == null || target.shouldDebug())
+                && !name.startsWith("__");
     }
 }

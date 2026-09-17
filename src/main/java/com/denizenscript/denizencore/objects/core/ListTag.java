@@ -25,6 +25,7 @@ import java.util.function.Predicate;
 import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 import java.util.stream.Stream;
+import com.denizenscript.denizencore.utilities.ScriptUtilities;
 
 public class ListTag implements List<String>, ObjectTag {
 
@@ -897,9 +898,9 @@ public class ListTag implements List<String>, ObjectTag {
             ListTag sub_list = new ListTag();
 
             for (String item : object) {
-                String[] strings = item.split(Pattern.quote(split));
-                if (strings.length > index) {
-                    sub_list.add(strings[index]);
+                List<String> strings = CoreUtilities.splitLiteral(item, split, 0);
+                if (strings.size() > index) {
+                    sub_list.add(strings.get(index));
                 }
                 else {
                     sub_list.add("null");
@@ -928,9 +929,9 @@ public class ListTag implements List<String>, ObjectTag {
 
             for (String key : input) {
                 for (String item : object) {
-                    String[] strings = item.split(Pattern.quote(split), 2);
-                    if (strings.length > 1 && strings[0].equalsIgnoreCase(key)) {
-                        result.add(strings[1]);
+                    List<String> strings = CoreUtilities.splitLiteral(item, split, 2);
+                    if (strings.size() > 1 && strings.get(0).equalsIgnoreCase(key)) {
+                        result.add(strings.get(1));
                     }
                 }
             }
@@ -958,9 +959,9 @@ public class ListTag implements List<String>, ObjectTag {
                 attribute.fulfill(1);
             }
             for (String item : object) {
-                String[] strings = item.split(Pattern.quote(split), 2);
-                if (strings.length > 1 && strings[1].equalsIgnoreCase(input)) {
-                    return new ElementTag(strings[0]);
+                List<String> strings = CoreUtilities.splitLiteral(item, split, 2);
+                if (strings.size() > 1 && strings.get(1).equalsIgnoreCase(input)) {
+                    return new ElementTag(strings.get(0));
                 }
             }
             return null;
@@ -1275,7 +1276,8 @@ public class ListTag implements List<String>, ObjectTag {
         // If the value input is a list, that list becomes a list-within-a-list, still only occupying one space in the outer list.
         // -->
         tagProcessor.registerStaticTag(ListTag.class, ObjectTag.class, "include_single", (attribute, object, val) -> {
-            ListTag copy = new ListTag(object);
+            ListTag copy = new ListTag(object.size() + 1);
+            copy.addAll(object);
             copy.addObject(val);
             return copy;
         });
@@ -1290,7 +1292,8 @@ public class ListTag implements List<String>, ObjectTag {
         // - narrate <list[one|two].include[three|four]>
         // -->
         tagProcessor.registerStaticTag(ListTag.class, ListTag.class, "include", (attribute, object, list) -> {
-            ListTag copy = new ListTag(object);
+            ListTag copy = new ListTag(object.size() + list.size());
+            copy.addAll(object);
             copy.addAll(list);
             return copy;
         });
@@ -1479,7 +1482,7 @@ public class ListTag implements List<String>, ObjectTag {
 
             if (replace.startsWith("regex:")) {
                 String regex = replace.substring("regex:".length());
-                Pattern tempPat = Pattern.compile(regex);
+                Pattern tempPat = CoreUtilities.regexPattern(regex, false);
                 for (int i = 0; i < object.size(); i++) {
                     if (tempPat.matcher(object.get(i)).matches()) {
                         if (replacement != null) {
@@ -2434,7 +2437,9 @@ public class ListTag implements List<String>, ObjectTag {
                             name = name.substring(0, squareBracket).trim();
                         }
                         queue.addDefinition(name, definition);
-                        Debug.echoDebug(entries.get(0), "Adding definition '" + name + "' as " + definition);
+                        if (ScriptUtilities.shouldDebugDefinition(entries.get(0), script, name)) {
+                            Debug.echoDebug(entries.get(0), "Adding definition '" + name + "' as " + definition);
+                        }
                         x++;
                     }
                     queue.start();
@@ -2475,11 +2480,14 @@ public class ListTag implements List<String>, ObjectTag {
                 attribute.echoError("Tag processing failed: " + ex.getMessage());
                 return null;
             }
-            ListTag newlist = new ListTag();
+            ListTag newlist = new ListTag(object.size());
             try {
+                ScriptEntry entry = attribute.getScriptEntry();
+                Attribute prepared = new Attribute(subAttribute, entry, attribute.context);
+                prepared.setHadAlternative(true);
+                TagContext perElement = prepared.context;
                 for (ObjectTag obj : object.objectForms) {
-                    Attribute tempAttrib = new Attribute(subAttribute, attribute.getScriptEntry(), attribute.context);
-                    tempAttrib.setHadAlternative(true);
+                    Attribute tempAttrib = Attribute.forRepeatedUse(subAttribute, entry, perElement, true);
                     ObjectTag objs = CoreUtilities.autoAttribTyped(obj, tempAttrib);
                     if ((objs == null) ? defaultValue : CoreUtilities.equalsIgnoreCase(objs.toString(), "true")) {
                         newlist.addObject(obj);
@@ -2535,9 +2543,13 @@ public class ListTag implements List<String>, ObjectTag {
                 return null;
             }
             try {
+                ScriptEntry entry = attribute.getScriptEntry();
+                boolean hadAlternative = attribute.hasAlternative() || fallback;
+                Attribute prepared = new Attribute(subAttribute, entry, attribute.context);
+                prepared.setHadAlternative(hadAlternative);
+                TagContext perElement = prepared.context;
                 for (ObjectTag obj : object.objectForms) {
-                    Attribute tempAttrib = new Attribute(subAttribute, attribute.getScriptEntry(), attribute.context);
-                    tempAttrib.setHadAlternative(attribute.hasAlternative() || fallback);
+                    Attribute tempAttrib = Attribute.forRepeatedUse(subAttribute, entry, perElement, hadAlternative);
                     ObjectTag objs = CoreUtilities.autoAttribTyped(obj, tempAttrib);
                     if (objs == null) {
                         objs = new ElementTag(defaultValue);
@@ -2568,16 +2580,16 @@ public class ListTag implements List<String>, ObjectTag {
             if (!attribute.hasParam()) {
                 return null;
             }
-            ListTag newlist = new ListTag();
+            ListTag newlist = new ListTag(object.size());
             TagContext context = attribute.context.clone();
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(context.definitionProvider);
             context.definitionProvider = provider;
             try {
                 String raw = attribute.getRawParam();
                 ParseableTag parseable = TagManager.parseTextToTag(raw, context);
-                StringHolder filterValueStr = new StringHolder("filter_value");
+                StringHolder filterValueStr = StringHolder.ofLowered("filter_value");
                 for (ObjectTag obj : object.objectForms) {
-                    provider.altDefs.map.put(filterValueStr, obj);
+                    provider.putOverride(filterValueStr, obj);
                     if (CoreUtilities.equalsIgnoreCase(parseable.parse(context).toString(), "true")) {
                         newlist.addObject(obj);
                     }
@@ -2614,9 +2626,9 @@ public class ListTag implements List<String>, ObjectTag {
             try {
                 String raw = attribute.getRawParam();
                 ParseableTag parseable = TagManager.parseTextToTag(raw, context);
-                StringHolder parseValueStr = new StringHolder("parse_value");
+                StringHolder parseValueStr = StringHolder.ofLowered("parse_value");
                 for (ObjectTag obj : object.objectForms) {
-                    provider.altDefs.map.put(parseValueStr, obj);
+                    provider.putOverride(parseValueStr, obj);
                     newlist.addObject(parseable.parse(context));
                 }
             }

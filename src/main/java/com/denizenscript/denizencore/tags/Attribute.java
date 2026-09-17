@@ -152,7 +152,14 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     String origin;
 
-    public ArrayList<String> seemingSuccesses = new ArrayList<>(2);
+    public ArrayList<String> seemingSuccesses;
+
+    public void addSeemingSuccess(String text) {
+        if (seemingSuccesses == null) {
+            seemingSuccesses = new ArrayList<>(2);
+        }
+        seemingSuccesses.add(text);
+    }
 
     /* Referenced by TagCodeGenerator */
     public boolean hadManualFulfill = false;
@@ -170,7 +177,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         if (CoreConfiguration.debugVerbose) {
             Debug.echoError("(Verbose) Attribute - error track reset");
         }
-        if (!seemingSuccesses.isEmpty()) {
+        if (seemingSuccesses != null && !seemingSuccesses.isEmpty()) {
             seemingSuccesses.clear();
         }
         hasContextFailed = false;
@@ -187,6 +194,22 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     public Attribute(Attribute ref, ScriptEntry scriptEntry, TagContext context) {
         this(ref, scriptEntry, context, 0);
+    }
+
+    private Attribute() {
+    }
+
+    public static Attribute forRepeatedUse(Attribute ref, ScriptEntry scriptEntry, TagContext preparedContext, boolean hadAlternative) {
+        Attribute result = new Attribute();
+        result.origin = ref.origin;
+        result.scriptEntry = scriptEntry;
+        result.attributes = ref.attributes;
+        result.hadAlternative = hadAlternative;
+        result.context = preparedContext;
+        if (preparedContext.debug) {
+            result.filled = new int[result.attributes.length];
+        }
+        return result;
     }
 
     private void setContext(TagContext context) {
@@ -262,14 +285,14 @@ public class Attribute implements TagContext.ShowErrorsMethod {
             if (CoreConfiguration.debugVerbose) {
                 Debug.log("Chain-Tag found!");
             }
-            seemingSuccesses.add(string);
+            addSeemingSuccess(string);
             return true;
         }
         if (attributes[fulfilled].key.equals(string)) {
             if (CoreConfiguration.debugVerbose) {
                 Debug.log("Sub-tag found!");
             }
-            seemingSuccesses.add(string);
+            addSeemingSuccess(string);
             return true;
         }
         return false;
@@ -310,7 +333,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     /* Referenced by TagCodeGenerator */
     public final void trackLastTagFailure() {
         if (fulfilled < attributes.length) {
-            seemingSuccesses.add(attributes[fulfilled].key);
+            addSeemingSuccess(attributes[fulfilled].key);
             if (filled != null) {
                 filled[fulfilled] = 2;
             }
@@ -350,9 +373,58 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     public static class OverridingDefinitionProvider implements DefinitionProvider {
         public DefinitionProvider originalProvider;
         public MapTag altDefs = new MapTag();
+
+        public StringHolder slotKeyA, slotKeyB;
+
+        public ObjectTag slotValueA, slotValueB;
+
         public OverridingDefinitionProvider(DefinitionProvider original) {
             originalProvider = original;
         }
+
+        public void putOverride(StringHolder key, ObjectTag value) {
+            if (slotKeyA == null || slotKeyA == key) {
+                slotKeyA = key;
+                slotValueA = value;
+            }
+            else if (slotKeyB == null || slotKeyB == key) {
+                slotKeyB = key;
+                slotValueB = value;
+            }
+            else {
+                altDefs.map.put(key, value);
+            }
+        }
+
+        private ObjectTag findOverride(String definition) {
+            int dot = definition.indexOf('.');
+            String root = dot == -1 ? definition : definition.substring(0, dot);
+            ObjectTag value = null;
+            if (slotKeyA != null && slotKeyA.low.equalsIgnoreCase(root)) {
+                value = slotValueA;
+            }
+            else if (slotKeyB != null && slotKeyB.low.equalsIgnoreCase(root)) {
+                value = slotValueB;
+            }
+            if (value == null) {
+                return altDefs.map.isEmpty() ? null : altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
+            }
+            if (dot == -1) {
+                return value;
+            }
+            List<String> subkeys = CoreUtilities.split(definition, '.');
+            for (int i = 1; i < subkeys.size(); i++) {
+                if (!(value instanceof MapTag map)) {
+                    return null;
+                }
+                value = map.getObject(subkeys.get(i));
+                if (value == null) {
+                    return null;
+                }
+            }
+            return value;
+        }
+
         @Override
         public void addDefinition(String definition, String value) {
             originalProvider.addDefinition(definition, value);
@@ -367,7 +439,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         }
         @Override
         public ObjectTag getDefinitionObject(String definition) {
-            ObjectTag result = altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
+            ObjectTag result = findOverride(definition);
             if (result != null) {
                 return result;
             }
@@ -376,7 +448,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
         @Override
         public String getDefinition(String definition) {
-            ObjectTag result = altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
+            ObjectTag result = findOverride(definition);
             if (result != null) {
                 return result.toString();
             }
@@ -385,7 +457,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
         @Override
         public boolean hasDefinition(String definition) {
-            ObjectTag result = altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
+            ObjectTag result = findOverride(definition);
             if (result != null) {
                 return true;
             }

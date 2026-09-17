@@ -143,7 +143,13 @@ public class TimedQueue extends ScriptQueue {
         if (paused || isDelayed()) {
             return;
         }
-        ScriptEngine.revolve(this);
+        ScriptQueue prior = ScriptEngine.enterQueue(this);
+        try {
+            ScriptEngine.revolve(this);
+        }
+        finally {
+            ScriptEngine.leaveQueue(prior);
+        }
         if (!hasMoreWork() && holdingOn == null && !waitWhenEmpty) {
             stop();
         }

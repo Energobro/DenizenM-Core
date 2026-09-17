@@ -129,6 +129,7 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         public int slot = DefinitionSlots.NO_SLOT;
         public int resolvedAtSize = -1;
         public StringHolder[] path;
+        public boolean special;
     }
 
     public static CachedKey keyFor(ScriptEntry scriptEntry, String defName) {
@@ -142,7 +143,8 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         CachedKey cached = new CachedKey();
         String lowered = CoreUtilities.toLowerCase(defName);
         cached.key = StringHolder.ofLowered(lowered);
-        if (!lowered.startsWith("__") && CoreUtilities.contains(lowered, '.')) {
+        cached.special = lowered.startsWith("__");
+        if (!cached.special && CoreUtilities.contains(lowered, '.')) {
             List<String> segments = CoreUtilities.split(lowered, '.');
             cached.path = new StringHolder[segments.size()];
             for (int i = 0; i < cached.path.length; i++) {
@@ -204,6 +206,10 @@ public class DefineCommand extends AbstractCommand implements Holdable {
             queue.addDefinitionDeep(cached.path, value.duplicate());
             return;
         }
-        queue.addDefinitionSlot(scriptEntry.internal.slotTable, cached.slot, cached.key, value.duplicate());
+        if (cached.special) {
+            queue.addDefinitionSlot(scriptEntry.internal.slotTable, cached.slot, cached.key, value.duplicate());
+            return;
+        }
+        queue.addDefinitionPlain(scriptEntry.internal.slotTable, cached.slot, cached.key, value.duplicate());
     }
 }

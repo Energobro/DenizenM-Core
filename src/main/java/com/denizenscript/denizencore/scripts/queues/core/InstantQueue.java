@@ -11,12 +11,18 @@ public class InstantQueue extends ScriptQueue {
 
     @Override
     public void onStart() {
-        while (is_started) {
-            if (!hasMoreWork() && holdingOn == null) {
-                stop();
-                return;
+        ScriptQueue prior = ScriptEngine.enterQueue(this);
+        try {
+            while (is_started) {
+                if (!hasMoreWork() && holdingOn == null) {
+                    stop();
+                    return;
+                }
+                ScriptEngine.revolve(this);
             }
-            ScriptEngine.revolve(this);
+        }
+        finally {
+            ScriptEngine.leaveQueue(prior);
         }
     }
 

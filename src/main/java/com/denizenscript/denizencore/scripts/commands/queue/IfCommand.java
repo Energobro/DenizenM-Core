@@ -245,13 +245,17 @@ public class IfCommand extends BracedCommand {
         }
         if (hasSoleBody) {
             if (!first_set) {
-                Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
+                if (scriptEntry.debugThisLine) {
+                    Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
+                }
                 return;
             }
             if (CoreConfiguration.debugVerbose) {
                 Debug.log("Running the first set");
             }
-            Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
+            if (scriptEntry.debugThisLine) {
+                Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
+            }
             List<ScriptEntry> soleList = scriptEntry.inlinedBody;
             if (soleList == null) {
                 soleList = duplicateBracedSection(getBracedCommands(scriptEntry, false).get(0), scriptEntry);
@@ -321,10 +325,14 @@ public class IfCommand extends BracedCommand {
                         if (!elseCondition.evaluate(braceSet.entry)) {
                             continue;
                         }
-                        Debug.echoDebug(scriptEntry, "<Y>If/else-if chain entry #" + (z + 1) + " passed, running block.");
+                        if (scriptEntry.debugThisLine) {
+                            Debug.echoDebug(scriptEntry, "<Y>If/else-if chain entry #" + (z + 1) + " passed, running block.");
+                        }
                     }
                     else {
-                        Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, running ELSE block.");
+                        if (scriptEntry.debugThisLine) {
+                            Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, running ELSE block.");
+                        }
                     }
                     List<ScriptEntry> bracedCommandsList = branchBodyFor(scriptEntry, z, braceSet);
                     if (bracedCommandsList == null) {
@@ -716,7 +724,7 @@ public class IfCommand extends BracedCommand {
                     ObjectTag first = tagvalue(scriptEntry, leftArg);
                     ObjectTag second = tagvalue(scriptEntry, rightArg);
                     boolean outcome = Comparable.compare(first, second, finalOperator, finalNegative, scriptEntry.context);
-                    if (scriptEntry.dbCallShouldDebug()) {
+                    if (scriptEntry.debugThisLine) {
                         Debug.echoDebug(scriptEntry, "Comparing if " + first + (finalNegative ? " not " : " ") + finalOperator.name() + " " + second + " ... " + outcome);
                     }
                     return outcome;

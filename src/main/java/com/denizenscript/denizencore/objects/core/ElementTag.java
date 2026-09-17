@@ -1060,7 +1060,7 @@ public class ElementTag implements ObjectTag {
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "contains_text", (attribute, object, contains) -> {
             String contLow = contains.asLowerString();
             if (contLow.startsWith("regex:")) {
-                return new ElementTag(Pattern.compile(contains.asString().substring("regex:".length()), Pattern.CASE_INSENSITIVE).matcher(object.asString()).find());
+                return new ElementTag(CoreUtilities.regexPattern(contains.asString().substring("regex:".length()), true).matcher(object.asString()).find());
             }
             return new ElementTag(object.asLowerString().contains(contLow));
         });
@@ -1150,7 +1150,7 @@ public class ElementTag implements ObjectTag {
                 return null;
             }
             String regex = attribute.getParam();
-            Matcher m = Pattern.compile(regex).matcher(object.text());
+            Matcher m = CoreUtilities.regexPattern(regex, false).matcher(object.text());
             if (!m.matches()) {
                 return null;
             }
@@ -1362,9 +1362,10 @@ public class ElementTag implements ObjectTag {
         // For example: HelloWorld .after[Hello] returns World.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "after", (attribute, object, delimiter) -> {
-            if (CoreUtilities.toLowerCase(object.text()).contains(delimiter.asLowerString())) {
-                return new ElementTag(object.text().substring
-                        (CoreUtilities.toLowerCase(object.text()).indexOf(delimiter.asLowerString()) + delimiter.asString().length()));
+            String text = object.text();
+            int index = CoreUtilities.toLowerCase(text).indexOf(delimiter.asLowerString());
+            if (index != -1) {
+                return new ElementTag(text.substring(index + delimiter.asString().length()));
             }
             else {
                 return new ElementTag("");
@@ -1398,12 +1399,13 @@ public class ElementTag implements ObjectTag {
         // For example: abcd .before[c] returns ab.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "before", (attribute, object, delimiter) -> {
-            if (CoreUtilities.toLowerCase(object.text()).contains(delimiter.asLowerString())) {
-                return new ElementTag(object.text().substring
-                        (0, CoreUtilities.toLowerCase(object.text()).indexOf(delimiter.asLowerString())));
+            String text = object.text();
+            int index = CoreUtilities.toLowerCase(text).indexOf(delimiter.asLowerString());
+            if (index != -1) {
+                return new ElementTag(text.substring(0, index));
             }
             else {
-                return new ElementTag(object.text());
+                return new ElementTag(text);
             }
         });
 
@@ -1442,13 +1444,16 @@ public class ElementTag implements ObjectTag {
                 }
             }
             if (replace.startsWith("regex:")) {
-                return new ElementTag(object.text().replaceAll(replace.substring("regex:".length()), replacement));
+                return new ElementTag(CoreUtilities.regexPattern(replace.substring("regex:".length()), false).matcher(object.text()).replaceAll(replacement));
             }
             if (replace.startsWith("firstregex:")) {
-                return new ElementTag(object.text().replaceFirst(replace.substring("firstregex:".length()), replacement));
+                return new ElementTag(CoreUtilities.regexPattern(replace.substring("firstregex:".length()), false).matcher(object.text()).replaceFirst(replacement));
+            }
+            else if (replace.isEmpty()) {
+                return new ElementTag(object.text().replaceAll("(?i)" + Pattern.quote(replace), Matcher.quoteReplacement(replacement)));
             }
             else {
-                return new ElementTag(object.text().replaceAll("(?i)" + Pattern.quote(replace), Matcher.quoteReplacement(replacement)));
+                return new ElementTag(CoreUtilities.replaceIgnoreCase(object.text(), replace, replacement));
             }
         });
         tagProcessor.registerFutureTagDeprecation("replace_text", "replace");
@@ -1732,14 +1737,16 @@ public class ElementTag implements ObjectTag {
         // -->
         tagProcessor.registerTag(ListTag.class, "split", (attribute, object) -> { // non-static due to hacked sub-tag
             String split_string = (attribute.hasParam() ? attribute.getParam() : " ");
-            if (CoreUtilities.toLowerCase(split_string).startsWith("regex:")) {
+            boolean asRegex = CoreUtilities.toLowerCase(split_string).startsWith("regex:");
+            if (asRegex) {
                 split_string = split_string.split(":", 2)[1];
-            }
-            else {
-                split_string = "(?i)" + Pattern.quote(split_string);
             }
             if (split_string.isEmpty()) {
                 attribute.echoError("Cannot split over empty value. Did you mean to use 'to_list'?");
+                if (!asRegex) {
+                    split_string = "(?i)" + Pattern.quote(split_string);
+                    asRegex = true;
+                }
             }
             String[] split;
 
@@ -1755,10 +1762,16 @@ public class ElementTag implements ObjectTag {
             if (attribute.startsWith("limit", 2)) {
                 int limit = (attribute.hasContext(2) ? attribute.getIntContext(2) : 1);
                 attribute.fulfill(1);
-                split = object.text().split(split_string, limit);
+                if (!asRegex) {
+                    return new ListTag(CoreUtilities.splitIgnoreCase(object.text(), split_string, limit));
+                }
+                split = CoreUtilities.regexPattern(split_string, false).split(object.text(), limit);
             }
             else {
-                split = object.text().split(split_string);
+                if (!asRegex) {
+                    return new ListTag(CoreUtilities.splitIgnoreCase(object.text(), split_string, 0));
+                }
+                split = CoreUtilities.regexPattern(split_string, false).split(object.text());
             }
             return new ListTag(Arrays.asList(split));
         });
