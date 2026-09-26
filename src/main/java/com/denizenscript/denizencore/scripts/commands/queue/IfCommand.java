@@ -228,7 +228,7 @@ public class IfCommand extends BracedCommand {
         List<String> elsecommand = !has_brace && parsed.hasElsecommand ? parsed.elsecommand : null;
         List<String> subcommand = !has_brace && (parsed.hasSubcommand || parsed.hasElsecommand) ? parsed.subcommand : null;
         List<String> comparisons = parsed.comparisons;
-        if (scriptEntry.dbCallShouldDebug()) {
+        if (scriptEntry.debugThisLine) {
             Debug.report(scriptEntry, "IF", db("use_braces", braces != null || hasSoleBody));
         }
         if (CoreConfiguration.debugVerbose) {
@@ -581,14 +581,16 @@ public class IfCommand extends BracedCommand {
 
         /** Reads one element as an object for a comparison. A crunched parenthesis group reduces to its own boolean first. */
         public static ObjectTag tagvalue(ScriptEntry scriptEntry, Object argObj) {
+            if (argObj instanceof PreParsedArg pre) {
+                ObjectTag constant = pre.tag.rawObject;
+                return constant != null ? constant : pre.tag.parse(contextFor(scriptEntry));
+            }
             if (argObj instanceof Condition) {
                 return new ElementTag(((Condition) argObj).evaluate(scriptEntry));
             }
-            if (argObj instanceof PreParsedArg pre) {
-                return pre.tag.parse(contextFor(scriptEntry));
-            }
             if (argObj instanceof ScriptEntry.InternalArgument internalArg && canUseParsed(internalArg, false)) {
-                return internalArg.value.parse(contextFor(scriptEntry));
+                ObjectTag constant = internalArg.value.rawObject;
+                return constant != null ? constant : internalArg.value.parse(contextFor(scriptEntry));
             }
             return tagme(scriptEntry, argObj, false).value;
         }

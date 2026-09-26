@@ -351,13 +351,11 @@ public class ScriptContainer implements Debuggable {
         if (set == null) {
             return null;
         }
-        set = set.duplicate();
+        List<ScriptEntry> entries = new ArrayList<>(set.entries.size());
         for (ScriptEntry entry : set.entries) {
-            entry.entryData = data.clone();
-            entry.updateContext();
-            entry.entryData.scriptEntry = entry;
+            entries.add(entry.cloneWithData(data));
         }
-        return set.entries;
+        return entries;
     }
 
     public List<ScriptEntry> getEntries(ScriptEntryData data, String path) {

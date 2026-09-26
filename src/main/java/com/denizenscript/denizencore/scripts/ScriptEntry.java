@@ -511,6 +511,22 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
      * context for it first, only to throw both away a line later. Loop bodies are rebuilt this way on every single iteration,
      * so that discarded pair was one of the most-repeated allocations in the engine.
      */
+    public ScriptEntry cloneWithData(ScriptEntryData data) {
+        try {
+            ScriptEntry se = (ScriptEntry) super.clone();
+            se.inlinedBody = null;
+            se.inlinedBranches = null;
+            se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
+            se.entryData = data.clone();
+            se.updateContext();
+            se.entryData.scriptEntry = se;
+            return se;
+        }
+        catch (CloneNotSupportedException ex) {
+            throw new RuntimeException(ex);
+        }
+    }
+
     public ScriptEntry cloneWithDataFrom(ScriptEntry copyFrom) {
         try {
             ScriptEntry se = (ScriptEntry) super.clone();

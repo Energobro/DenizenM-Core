@@ -158,7 +158,7 @@ public class DefineMapCommand extends AbstractCommand implements Holdable {
         CachedMap cached = scriptEntry.internal.specialProcessedData instanceof CachedMap ? (CachedMap) scriptEntry.internal.specialProcessedData : null;
         ElementTag definition = cached != null ? cached.definition : scriptEntry.getElement("definition");
         MapTag value = cached != null ? cached.template : scriptEntry.getObjectTag("map");
-        if (scriptEntry.dbCallShouldDebug()) {
+        if (scriptEntry.debugThisLine) {
             Debug.report(scriptEntry, getName(), new QueueTag(scriptEntry.getResidingQueue()), definition, value);
         }
         if (cached == null) {

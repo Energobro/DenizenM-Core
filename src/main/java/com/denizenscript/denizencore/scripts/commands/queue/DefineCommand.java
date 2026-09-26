@@ -125,6 +125,7 @@ public class DefineCommand extends AbstractCommand implements Holdable {
      * (<@link tag definition>, eg 'define <[which]> 1') really can differ per run, so only a tagless one is cached.
      */
     public static class CachedKey {
+        public boolean hasColon;
         public StringHolder key;
         public int slot = DefinitionSlots.NO_SLOT;
         public int resolvedAtSize = -1;
@@ -134,6 +135,9 @@ public class DefineCommand extends AbstractCommand implements Holdable {
 
     public static CachedKey keyFor(ScriptEntry scriptEntry, String defName) {
         if (scriptEntry.internal.specialProcessedData instanceof CachedKey cached) {
+            if (cached.hasColon) {
+                return cached;
+            }
             if (cached.slot == DefinitionSlots.NO_SLOT && cached.resolvedAtSize != ScriptQueue.tableSizeFor(scriptEntry)) {
                 cached.resolvedAtSize = ScriptQueue.tableSizeFor(scriptEntry);
                 cached.slot = ScriptQueue.slotFor(scriptEntry, cached.key);
@@ -141,6 +145,11 @@ public class DefineCommand extends AbstractCommand implements Holdable {
             return cached;
         }
         CachedKey cached = new CachedKey();
+        if (CoreUtilities.contains(defName, ':')) {
+            cached.hasColon = true;
+            cacheIfFixed(scriptEntry, cached);
+            return cached;
+        }
         String lowered = CoreUtilities.toLowerCase(defName);
         cached.key = StringHolder.ofLowered(lowered);
         cached.special = lowered.startsWith("__");
@@ -153,11 +162,15 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         }
         cached.resolvedAtSize = ScriptQueue.tableSizeFor(scriptEntry);
         cached.slot = ScriptQueue.slotFor(scriptEntry, cached.key);
+        cacheIfFixed(scriptEntry, cached);
+        return cached;
+    }
+
+    private static void cacheIfFixed(ScriptEntry scriptEntry, CachedKey cached) {
         ScriptEntry.InternalArgument[] args = scriptEntry.internal.arguments_to_use;
         if (args != null && args.length > 0 && args[0].value != null && !args[0].value.hasTag) {
             scriptEntry.internal.specialProcessedData = cached;
         }
-        return cached;
     }
 
     public static class DefinitionActionProvider extends ActionableDataProvider {
@@ -185,11 +198,12 @@ public class DefineCommand extends AbstractCommand implements Holdable {
             value.setPrefix("value");
         }
         String defName = definition.asString();
-        if (CoreUtilities.contains(defName, ':')) {
+        CachedKey cached = keyFor(scriptEntry, defName);
+        if (cached.hasColon) {
             DefinitionActionProvider provider = new DefinitionActionProvider();
             provider.queue = queue;
             DataAction action = DataActionHelper.parse(provider, defName, scriptEntry.context);
-            if (scriptEntry.dbCallShouldDebug()) {
+            if (scriptEntry.debugThisLine) {
                 Debug.report(scriptEntry, "DEFINE", new QueueTag(queue), action);
             }
             action.execute(scriptEntry.getContext());
@@ -198,10 +212,9 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         if (value == null) {
             throw new InvalidArgumentsRuntimeException("Must specify a definition and value!");
         }
-        if (scriptEntry.dbCallShouldDebug()) {
+        if (scriptEntry.debugThisLine) {
             Debug.report(scriptEntry, "DEFINE", new QueueTag(queue), definition, value);
         }
-        CachedKey cached = keyFor(scriptEntry, defName);
         if (cached.path != null) {
             queue.addDefinitionDeep(cached.path, value.duplicate());
             return;
