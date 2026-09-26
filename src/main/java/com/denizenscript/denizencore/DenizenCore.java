@@ -393,16 +393,6 @@ public class DenizenCore {
 
     public static volatile long lingerAdaptiveNanos = 0;
 
-    /**
-     * Nanoseconds spent in {@link #lingerForFollowUpRequests()} after the last answer, waiting for a follow-up that never came - what
-     * {@link CoreConfiguration#mainThreadWaitLingerMicros} costs when it does not pay off. TPS cannot show this: a few ms a tick reads as nothing
-     * until the tick has no headroom left. Written only by the main thread, volatile so <@link tag util.linger_stats> can read it off-thread.
-     */
-    public static volatile long lingerIdleNanos = 0;
-
-    /** How many times the window has been entered, so the idle total above can be read as an average per entry. */
-    public static volatile long lingerCount = 0;
-
     public static long nextLingerNanos() {
         long base = CoreConfiguration.mainThreadWaitLingerMicros * 1000L;
         return Math.max(base, Math.min(lingerAdaptiveNanos, base * LINGER_ADAPTIVE_MAX_MULTIPLIER));
@@ -424,9 +414,7 @@ public class DenizenCore {
         long start = System.nanoTime();
         long hardEnd = start + LINGER_HARD_CAP_NANOS;
         long deadline = Math.min(start + linger, hardEnd);
-        // What comes after the last answer, up to whichever exit is taken, is the part that bought nothing.
         long lastAnswer = start;
-        lingerCount++;
         int spins = 0;
         while (true) {
             Runnable task = mainThreadWaitingTasks.poll();
@@ -442,10 +430,8 @@ public class DenizenCore {
                 spins = 0;
                 continue;
             }
-            // The deadline check needed this reading anyway, so measuring the tail costs nothing.
             long now = System.nanoTime();
             if (now >= deadline) {
-                lingerIdleNanos += now - lastAnswer;
                 adaptLingerWindow(linger, base, lastAnswer != start);
                 return;
             }

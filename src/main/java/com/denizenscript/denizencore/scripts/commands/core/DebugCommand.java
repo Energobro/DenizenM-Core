@@ -52,10 +52,11 @@ public class DebugCommand extends AbstractCommand implements Holdable {
     // ERROR: "Error!" output, non-hideable. Supports the 'error' format type, see <@link language Script Formats>.
     // REPORT: normally used to describe the arguments of a command, requires a name, hideable.
     // EXCEPTION: outputs a full java stacktrace.
-    // RECORD: Use message 'start' to start recording, 'submit' to submit a recording, or 'cancel' to cancel a recording.
+    // RECORD: Use message 'start' to start recording, or 'cancel' to cancel a recording.
+    // The 'submit' form is no longer supported in this fork - it used to upload the recording to a remote paste service, and that upload has been removed.
     //
     // @Tags
-    // <entry[saveName].submitted> returns the submit link (if any).
+    // <entry[saveName].submitted> is never filled in this fork, as recording submission was removed.
     //
     // @Usage
     // Use to show an error.
@@ -67,11 +68,9 @@ public class DebugCommand extends AbstractCommand implements Holdable {
     //
     // @Usage
     // Use to record a debug log of a certain script.
-    // # NOTICE: Spamming debug recordings to the official Denizen Paste instance will result in you being blocked from the paste service.
     // - debug record start
     // - run myscript
-    // - ~debug record submit save:mylog
-    // - narrate "Recorded log as <entry[mylog].submitted||<red>FAILED>"
+    // - debug record cancel
     //
     // -->
 
@@ -156,7 +155,10 @@ public class DebugCommand extends AbstractCommand implements Holdable {
                         break;
                     case "submit":
                         DebugSubmitter.submitCurrentRecording(s -> {
-                            if (s == null) {
+                            if (DebugSubmitter.UNSUPPORTED.equals(s)) {
+                                Debug.echoError(scriptEntry, "Debug record submission is no longer supported in this fork: the upload to a remote paste service was removed. Use 'debug record cancel' and read the recording from your own console log.");
+                            }
+                            else if (s == null) {
                                 Debug.echoDebug(scriptEntry, "Submit failed.");
                             }
                             else if (s.equals("disabled")) {
