@@ -61,6 +61,16 @@ public class CustomScriptEvent extends ScriptEvent {
     }
 
     @Override
+    public String fastRejectSwitch() {
+        return "id";
+    }
+
+    @Override
+    public String fastRejectValue() {
+        return id;
+    }
+
+    @Override
     public boolean matches(ScriptPath path) {
         if (!runGenericSwitchCheck(path, "id", id)) {
             return false;

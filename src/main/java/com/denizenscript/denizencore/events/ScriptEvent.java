@@ -40,7 +40,9 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
     @Override
     public ScriptEvent clone() {
         try {
-            return (ScriptEvent) super.clone();
+            ScriptEvent copy = (ScriptEvent) super.clone();
+            copy.perFireContext = null;
+            return copy;
         }
         catch (CloneNotSupportedException e) {
             Debug.echoError("Clone not supported for script events?!");
@@ -198,6 +200,7 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
     public static class ScriptPath {
 
         public ScriptContainer container;
+        public ScriptTag containerTag;
         public String event;
         public String eventLower;
         public String rawContainerPath;
@@ -216,6 +219,67 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
         public double switch_chance;
         public List<String> switch_serverFlagged;
         public TagContext context;
+        public String[] switchNames = new String[0];
+        public String[] switchValues = new String[0];
+        public String[] switchLiterals = new String[0];
+        public MatchHelper[] switchMatchers = new MatchHelper[0];
+
+        public void buildSwitchMatchers() {
+            String[] names = new String[switches.size()];
+            String[] values = new String[names.length];
+            String[] literals = new String[names.length];
+            MatchHelper[] matchers = new MatchHelper[names.length];
+            int i = 0;
+            for (Map.Entry<String, String> entry : switches.entrySet()) {
+                names[i] = entry.getKey();
+                values[i] = entry.getValue();
+                try {
+                    matchers[i] = createMatcher(entry.getValue());
+                }
+                catch (Throwable ex) {
+                    matchers[i] = null;
+                }
+                literals[i] = matchers[i] instanceof ExactMatchHelper exact ? exact.text : null;
+                i++;
+            }
+            switchNames = names;
+            switchValues = values;
+            switchLiterals = literals;
+            switchMatchers = matchers;
+            fastRejectFor = null;
+        }
+
+        public String fastRejectFor;
+
+        public String fastRejectLiteral;
+
+        /**
+         * The literal value of the given switch on this path, or null when it has none to reject by.
+         * <p>
+         * An event asks for the same switch name on every firing, so the answer is found once and then read back. The name is
+         * compared by identity because {@link ScriptEvent#fastRejectSwitch} returns a constant; a different string re-resolves it.
+         */
+        public String fastRejectLiteral(String key) {
+            if (fastRejectFor != key) {
+                int index = switchIndex(key);
+                fastRejectLiteral = index == -1 ? null : switchLiterals[index];
+                fastRejectFor = key;
+            }
+            return fastRejectLiteral;
+        }
+
+        public int switchIndex(String key) {
+            if (switchNames.length != switches.size()) {
+                buildSwitchMatchers();
+            }
+            String[] names = switchNames;
+            for (int i = 0; i < names.length; i++) {
+                if (names[i].equals(key)) {
+                    return i;
+                }
+            }
+            return -1;
+        }
 
         public String rawEventArgAt(int index) {
             return index < rawEventArgs.length ? rawEventArgs[index] : "";
@@ -235,22 +299,22 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
         }
 
         public boolean checkSwitch(String key, String value) {
-            String pathValue = switches.get(key);
-            if (pathValue == null) {
+            int index = switchIndex(key);
+            if (index == -1) {
                 return true;
             }
-            return CoreUtilities.equalsIgnoreCase(pathValue, value);
+            return CoreUtilities.equalsIgnoreCase(switchValues[index], value);
         }
 
         public boolean tryObjectSwitch(String key, ObjectTag obj) {
-            String val = switches.get(key);
-            if (val == null) {
+            int index = switchIndex(key);
+            if (index == -1) {
                 return true;
             }
             if (obj == null) {
                 return false;
             }
-            return obj.tryAdvancedMatcher(val, context);
+            return obj.tryAdvancedMatcher(switchValues[index], context);
         }
 
         public boolean tryArgObject(int argIndex, ObjectTag obj) {
@@ -276,6 +340,7 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
             this.rawContainerPath = rawContainerPath;
             rawEventArgs = CoreUtilities.split(event, ' ').toArray(new String[0]);
             this.container = container;
+            this.containerTag = new ScriptTag(container);
             List<String> eventLabel = new ArrayList<>();
             for (String possible : CoreUtilities.split(event, ' ').toArray(new String[0])) {
                 List<String> split = CoreUtilities.split(possible, ':', 2);
@@ -295,6 +360,7 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
             switch_ignoreCancelled = switches.containsKey("ignorecancelled") ? CoreUtilities.equalsIgnoreCase(switches.get("ignorecancelled"), "true") : null;
             switch_serverFlagged = switches.containsKey("server_flagged") ? CoreUtilities.split(switches.get("server_flagged"), '|') : null;
             switch_chance = switches.containsKey("chance") ? new ElementTag(switches.get("chance")).asDouble() : 0;
+            buildSwitchMatchers();
             set = container.getSetFor("events." + rawContainerPath);
             if (set == null || set.entries == null) {
                 Debug.echoError("Invalid script (formatting error?) in container '" + container.getName() + " at event '" + rawContainerPath + "'.");
@@ -548,6 +614,7 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
      */
     public static List<BiFunction<ScriptEvent, ScriptPath, Boolean>> extraMatchers = new ArrayList<>();
 
+
     // <--[language]
     // @name Script Event Priority
     // @group Script Events
@@ -744,12 +811,39 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
     }
 
     /**
+     * The name of a switch whose literal value can reject a path before any matching work is done, or null to check every path.
+     * <p>
+     * An event that answers this must also answer {@link #fastRejectValue}. A path is skipped only when that switch is written as
+     * plain text that does not match, so a wildcard, a list, a negation or a regex is never rejected this way.
+     */
+    public String fastRejectSwitch() {
+        return null;
+    }
+
+    /** This firing's value for {@link #fastRejectSwitch}. */
+    public String fastRejectValue() {
+        return null;
+    }
+
+    /**
      * Makes a copy of this event object, fires it, and returns the copy.
      */
     public ScriptEvent fire() {
         ScriptEvent copy = clone();
         eventData.stats_fires++;
+        String rejectSwitch = fastRejectSwitch();
+        String rejectValue = null;
+        if (rejectSwitch != null) {
+            String rawValue = fastRejectValue();
+            rejectValue = rawValue == null ? null : lowerSwitchValue(rawValue);
+        }
         for (ScriptPath path : eventPaths) {
+            if (rejectValue != null) {
+                String literal = path.fastRejectLiteral(rejectSwitch);
+                if (literal != null && !literal.equals(rejectValue)) {
+                    continue;
+                }
+            }
             try {
                 if (matchesScript(copy, path)) {
                     if (path.fireAfter) {
@@ -766,6 +860,7 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
                 Debug.echoError(e);
             }
         }
+        copy.perFireContext = null;
         return copy;
     }
 
@@ -795,9 +890,15 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
         }
     }
 
+    public TagContext perFireContext;
+
     public TagContext getTagContext(ScriptPath path) {
-        TagContext context = getScriptEntryData().getTagContext().clone();
-        context.script = new ScriptTag(path.container);
+        TagContext context = perFireContext;
+        if (context == null) {
+            context = getScriptEntryData().getTagContext().clone();
+            perFireContext = context;
+        }
+        context.script = path.containerTag;
         context.debug = path.container.shouldDebug();
         return context;
     }
@@ -1096,17 +1197,31 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
         return matcher.doesMatch(trueValue);
     }
 
+    public static volatile String[] lastLoweredSwitchValue;
+
+    public static String lowerSwitchValue(String value) {
+        String[] cached = lastLoweredSwitchValue;
+        if (cached != null && cached[0] == value) {
+            return cached[1];
+        }
+        String lowered = CoreUtilities.toLowerCase(value);
+        lastLoweredSwitchValue = new String[] { value, lowered };
+        return lowered;
+    }
+
     public static boolean runGenericSwitchCheck(ScriptPath path, String switchName, String value) {
-        String with = path.switches.get(switchName);
-        if (with == null) {
+        int index = path.switchIndex(switchName);
+        if (index == -1) {
             return true;
         }
         if (value == null) {
             return false;
         }
-        value = CoreUtilities.toLowerCase(value);
-        MatchHelper matcher = createMatcher(with);
-        return matcher.doesMatch(value);
+        MatchHelper matcher = path.switchMatchers[index];
+        if (matcher == null) {
+            matcher = createMatcher(path.switchValues[index]);
+        }
+        return matcher.doesMatch(lowerSwitchValue(value));
     }
 
     public static boolean coreFlaggedCheck(String flagged, AbstractFlagTracker tracker) {
