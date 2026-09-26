@@ -14,6 +14,7 @@ import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.data.ActionableDataProvider;
 import com.denizenscript.denizencore.utilities.data.DataAction;
 import com.denizenscript.denizencore.utilities.data.DataActionHelper;
+import com.denizenscript.denizencore.utilities.data.DataActionType;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 
@@ -168,21 +169,21 @@ public class FlagCommand extends AbstractCommand {
         for (Argument arg : scriptEntry) {
             if (!scriptEntry.hasObject("targets")
                 && !arg.hasPrefix()) {
-                scriptEntry.addObject("targets", arg.asType(ListTag.class));
+                scriptEntry.addObject("targets", targetsFor(scriptEntry, arg));
             }
             else if (!scriptEntry.hasObject("expiration")
                     && arg.matchesPrefix("expire", "expires", "expiration", "duration")
-                    && arg.matchesArgumentType(TimeTag.class)) {
-                scriptEntry.addObject("expiration", arg.asType(TimeTag.class));
-            }
-            else if (!scriptEntry.hasObject("expiration")
-                    && arg.matchesPrefix("expire", "expires", "expiration", "duration")
-                    && arg.matchesArgumentType(DurationTag.class)) {
-                TimeTag now = TimeTag.now();
-                scriptEntry.addObject("expiration", new TimeTag(now.millis() + arg.asType(DurationTag.class).getMillis(), now.instant.getZone()));
+                    && (arg.matchesArgumentType(TimeTag.class) || arg.matchesArgumentType(DurationTag.class))) {
+                if (arg.matchesArgumentType(TimeTag.class)) {
+                    scriptEntry.addObject("expiration", arg.asType(TimeTag.class));
+                }
+                else {
+                    TimeTag now = TimeTag.now();
+                    scriptEntry.addObject("expiration", new TimeTag(now.millis() + arg.asType(DurationTag.class).getMillis(), now.instant.getZone()));
+                }
             }
             else if (!scriptEntry.hasObject("flag_action")) {
-                scriptEntry.addObject("flag_action", DataActionHelper.parse(new FlagActionProvider(), arg, scriptEntry.context));
+                scriptEntry.addObject("flag_action", flagActionFor(scriptEntry, arg));
             }
             else {
                 arg.reportUnhandled();
@@ -253,6 +254,96 @@ public class FlagCommand extends AbstractCommand {
         return true;
     }
 
+    /**
+     * The parsed shape of a flag action, remembered on the line when the argument reads the same text again.
+     * <p>
+     * Parsing it costs a split, a key scan and an {@link com.denizenscript.denizencore.objects.ObjectFetcher} lookup for the value,
+     * and a line like 'flag server counter:5' hands over the same text on every execution. The text compared here is the argument's
+     * value after tags are filled in, so a line whose value really does change per run misses the cache and parses as before.
+     */
+    public static class CachedAction {
+        public String text;
+        public DataActionType type;
+        public String key;
+        public int index;
+        public ObjectTag inputValue;
+        public String targetsText;
+        public ListTag targets;
+    }
+
+    /**
+     * A filled cache is published in one reference write to the volatile {@code specialProcessedData}, never filled in place.
+     * <p>
+     * Two threads can run the same flag line at the same moment with different values. Filling a published object field by field
+     * would let one of them match the text while still reading another's half-written action, and write the wrong value.
+     */
+    private static CachedAction cacheOf(ScriptEntry scriptEntry) {
+        return scriptEntry.internal.specialProcessedData instanceof CachedAction cached ? cached : null;
+    }
+
+    /**
+     * The target list, remembered on the line when the argument reads the same text again.
+     * <p>
+     * Only a list whose every entry is a plain {@link ElementTag} is kept: those are read but never written by the flag write,
+     * while a {@link FlaggableObject} entry has its tracker reapplied onto it, and handing the same instance to two threads at
+     * once would be a race.
+     */
+    public static ListTag targetsFor(ScriptEntry scriptEntry, Argument arg) {
+        String text = arg.getRawValue();
+        CachedAction cached = cacheOf(scriptEntry);
+        if (cached != null && cached.targets != null && cached.targetsText.equals(text)) {
+            return cached.targets;
+        }
+        ListTag parsed = arg.asType(ListTag.class);
+        for (ObjectTag object : parsed.objectForms) {
+            if (!(object instanceof ElementTag)) {
+                return parsed;
+            }
+        }
+        CachedAction updated = new CachedAction();
+        if (cached != null) {
+            updated.text = cached.text;
+            updated.type = cached.type;
+            updated.key = cached.key;
+            updated.index = cached.index;
+            updated.inputValue = cached.inputValue;
+        }
+        updated.targetsText = text;
+        updated.targets = parsed;
+        scriptEntry.internal.specialProcessedData = updated;
+        return parsed;
+    }
+
+    public static DataAction flagActionFor(ScriptEntry scriptEntry, Argument arg) {
+        String text = arg.getRawValue();
+        CachedAction cached = cacheOf(scriptEntry);
+        if (cached != null && cached.text != null && cached.text.equals(text)) {
+            DataAction reused = new DataAction();
+            reused.provider = new FlagActionProvider();
+            reused.type = cached.type;
+            reused.key = cached.key;
+            reused.index = cached.index;
+            reused.inputValue = cached.inputValue;
+            return reused;
+        }
+        DataAction parsed = DataActionHelper.parse(new FlagActionProvider(), arg, scriptEntry.context);
+        if (parsed.inputValue != null && !(parsed.inputValue instanceof ElementTag)) {
+            return parsed;
+        }
+        CachedAction updated = new CachedAction();
+        if (cached != null) {
+            updated.targetsText = cached.targetsText;
+            updated.targets = cached.targets;
+        }
+        updated.text = text;
+        updated.type = parsed.type;
+        updated.key = parsed.key;
+        updated.index = parsed.index;
+        updated.inputValue = parsed.inputValue;
+        scriptEntry.internal.specialProcessedData = updated;
+        return parsed;
+    }
+
     @Override
     public void execute(ScriptEntry scriptEntry) {
         ListTag targets = scriptEntry.getObjectTag("targets");
@@ -269,7 +360,7 @@ public class FlagCommand extends AbstractCommand {
     public void writeFlags(ScriptEntry scriptEntry, ListTag targets) {
         TimeTag expiration = scriptEntry.getObjectTag("expiration");
         DataAction flagAction = (DataAction) scriptEntry.getObject("flag_action");
-        if (scriptEntry.dbCallShouldDebug()) {
+        if (scriptEntry.debugThisLine) {
             Debug.report(scriptEntry, getName(), targets, expiration, flagAction);
         }
         ((FlagActionProvider) flagAction.provider).expiration = expiration;

@@ -167,13 +167,14 @@ public abstract class AbstractFlagTracker {
             attribute.echoError("The flag[...] tag must have an input!");
             return null;
         }
-        if (attribute.getAttributeWithoutParam(2).equals("is_expired")) {
+        String subTag = attribute.getAttributeWithoutParam(2);
+        if (subTag.equals("is_expired")) {
             Deprecations.flagIsExpiredTag.warn(attribute.context);
             boolean result = !hasFlag(attribute.getParam());
             attribute.fulfill(1);
             return new ElementTag(result);
         }
-        else if (attribute.getAttributeWithoutParam(2).equals("expiration")) {
+        else if (subTag.equals("expiration")) {
             Deprecations.flagExpirationTag.warn(attribute.context);
             TimeTag time = getFlagExpirationTime(attribute.getParam());
             if (time == null) {
