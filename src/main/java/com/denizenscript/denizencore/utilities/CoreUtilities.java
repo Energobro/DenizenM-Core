@@ -33,6 +33,7 @@ import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.function.Function;
 import java.util.regex.Pattern;
 
@@ -486,10 +487,16 @@ public class CoreUtilities {
         });
     }
 
-    static Random random = new Random();
-
+    /**
+     * The random source for scripts, one per calling thread.
+     * <p>
+     * {@link Random#nextInt} on a single shared instance advances an atomic seed by compare-and-set, so every script thread and
+     * the main thread were contending for one cache line on every random tag, and twice more for every queue id. A
+     * {@link ThreadLocalRandom} instance holds no state of its own - it reads and writes the calling thread's own fields - so
+     * passing the same reference around stays correct.
+     */
     public static Random getRandom() {
-        return random;
+        return ThreadLocalRandom.current();
     }
 
     public static BigDecimal stripDecimal(BigDecimal input) {

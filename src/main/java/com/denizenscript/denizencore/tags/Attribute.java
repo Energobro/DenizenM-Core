@@ -565,6 +565,13 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         if (component.paramParsed == null) {
             return null;
         }
+        // A param written as plain text - '.add[1]', '.get[3]', '.flag[name]' - already holds its object, so there is nothing to
+        // remember and no reason to build this attribute's cache array for it. Only a param with a tag inside can cost enough to memo.
+        // Under debug the array is still filled, because that is where the tag's printed form reads its param values from.
+        ObjectTag raw = component.paramParsed.rawObject;
+        if (raw != null && !context.debug) {
+            return raw;
+        }
         tagged = component.paramParsed.parse(context);
         if (contexts == null) {
             contexts = new ObjectTag[attributes.length];

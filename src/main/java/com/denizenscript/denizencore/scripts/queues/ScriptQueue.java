@@ -570,6 +570,29 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         this.delay_time = delayTime;
     }
 
+    /** The prefix-and-number shapes, with or without words, built without a StringBuilder. */
+    private void generateIdFast(String prefix, long numericId) {
+        if (!CoreConfiguration.queueIdWords) {
+            id = prefix + "_" + numericId;
+        }
+        else {
+            List<String> wordList = QueueWordList.FinalWordList;
+            Random wordRandom = CoreUtilities.getRandom();
+            int wordCount = wordList.size();
+            String firstWord = wordList.get(wordRandom.nextInt(wordCount));
+            String secondWord = wordList.get(wordRandom.nextInt(wordCount));
+            id = prefix + "_" + numericId + "_" + firstWord + secondWord;
+            debugIdWords = new String[] {firstWord, secondWord};
+        }
+        debugIdPrefix = prefix;
+        debugIdNumeric = numericId;
+        debugId = null;
+    }
+
+    private static boolean queueIdPrefixAndNumeric() {
+        return CoreConfiguration.queueIdPrefix && CoreConfiguration.queueIdNumeric;
+    }
+
     public final void generateId(String prefix, long numericId, int depth) {
         if (prefix.startsWith("FORCE:")) {
             id = prefix.substring("FORCE:".length());
@@ -578,6 +601,12 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         }
         // DUUIDs v2.5
         debugIdWords = null;
+        // The two shapes every real config uses, built by plain concatenation so the compiler sizes and fills one array instead of
+        // a StringBuilder that guesses a capacity and then copies itself out again. Output is character for character the same.
+        if (queueIdPrefixAndNumeric() && depth == 0) {
+            generateIdFast(prefix, numericId);
+            return;
+        }
         StringBuilder idBuilder = new StringBuilder(prefix.length() + 32);
         if (CoreConfiguration.queueIdPrefix) {
             idBuilder.append(prefix).append('_');
@@ -697,7 +726,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (doBasicConfig) {
             script = script_entries.get(0).getScript();
             startTime = System.nanoTime();
-            startTimeMilli = CoreUtilities.monotonicMillis();
+            startTimeMilli = startTime / 1000000;
             String name = getName();
             if (queueNeedsToDebug()) {
                 if (is_delayed) {
