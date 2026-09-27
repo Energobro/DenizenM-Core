@@ -219,6 +219,9 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
         public double switch_chance;
         public List<String> switch_serverFlagged;
         public TagContext context;
+
+        /** The event being matched, set for the duration of the match so that {@link #tryArgObject} can reach its memo. */
+        public ScriptEvent currentEvent;
         public String[] switchNames = new String[0];
         public String[] switchValues = new String[0];
         public String[] switchLiterals = new String[0];
@@ -314,6 +317,8 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
             if (obj == null) {
                 return false;
             }
+            // Deliberately not memoised: a switch value is written per path, so sharing one slot with the event-argument match
+            // evicted the answer that match needs on every single path, which measured worse than doing the work.
             return obj.tryAdvancedMatcher(switchValues[index], context);
         }
 
@@ -321,7 +326,9 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
             if (obj == null) {
                 return false;
             }
-            return obj.tryAdvancedMatcher(eventArgAt(argIndex), context);
+            ScriptEvent event = currentEvent;
+            String matcher = eventArgAt(argIndex);
+            return event != null ? event.matchesObject(obj, matcher, context) : obj.tryAdvancedMatcher(matcher, context);
         }
 
         // <--[data]
@@ -604,7 +611,9 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
             }
         }
         path.context = sEvent.getTagContext(path);
+        path.currentEvent = sEvent;
         boolean matches = sEvent.matches(path);
+        path.currentEvent = null;
         path.context = null;
         return matches;
     }
@@ -816,6 +825,33 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
      * An event that answers this must also answer {@link #fastRejectValue}. A path is skipped only when that switch is written as
      * plain text that does not match, so a wildcard, a list, a negation or a regex is never rejected this way.
      */
+    private ObjectTag lastMatchObject;
+
+    private String lastMatchText;
+
+    private boolean lastMatchResult;
+
+    /**
+     * Matches one of this firing's objects against a path's matcher text, remembering the last answer.
+     * <p>
+     * Every path of a firing asks about the same object, and paths written for one event usually name it the same way - twenty
+     * scripts on "on entity damaged" all ask whether the entity matches "entity". Running the matcher for each of them re-reads
+     * the object's type, walks the custom matchers and looks the matcher text up again, for an answer that cannot differ.
+     * <p>
+     * The object is part of the key, so an answer left from an earlier firing can never be handed back for a new one, and a path
+     * naming the object differently simply misses and asks properly.
+     */
+    public boolean matchesObject(ObjectTag object, String matcher, TagContext context) {
+        if (object == lastMatchObject && matcher.equals(lastMatchText)) {
+            return lastMatchResult;
+        }
+        boolean result = object.tryAdvancedMatcher(matcher, context);
+        lastMatchObject = object;
+        lastMatchText = matcher;
+        lastMatchResult = result;
+        return result;
+    }
+
     public String fastRejectSwitch() {
         return null;
     }
