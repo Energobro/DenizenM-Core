@@ -4,6 +4,7 @@ import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.tags.TagContext;
+import com.denizenscript.denizencore.tags.ParseableTag;
 import com.denizenscript.denizencore.tags.TagManager;
 import com.denizenscript.denizencore.utilities.AsciiMatcher;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
@@ -32,6 +33,14 @@ public class Argument implements Cloneable {
     public String lower_value;
 
     public ObjectTag object = null;
+
+    /** What kind of pre-processed argument this is, decided when the line loads. See {@link #PREPROC_NONE} and friends. */
+    public byte preprocKind = PREPROC_NONE;
+
+    public static final byte PREPROC_NONE = 0, PREPROC_IF = 1, PREPROC_SAVE = 2, PREPROC_CUSTOM = 3;
+
+    /** The value of a pre-processed argument, parsed once for the line rather than looked up by text on every execution. */
+    public ParseableTag preprocValue;
 
     public ScriptEntry scriptEntry = null;
 

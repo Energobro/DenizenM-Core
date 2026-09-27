@@ -4,6 +4,8 @@ import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsRuntimeException;
 import com.denizenscript.denizencore.objects.Argument;
 import com.denizenscript.denizencore.tags.TagContext;
+import com.denizenscript.denizencore.objects.ObjectTag;
+import com.denizenscript.denizencore.tags.ParseableTag;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
@@ -292,32 +294,45 @@ public class CommandExecutor {
         return false;
     }
 
+    /**
+     * Which kind each pre-processed argument is was decided when the line loaded, so this neither asks the implementation about
+     * arguments it never claims nor compares prefixes as text again. The value is parsed once for the line and then read back.
+     */
     private static boolean runPreprocArgs(ScriptEntry scriptEntry, List<Argument> preprocArgs) {
         for (int i = 0; i < preprocArgs.size(); i++) {
-            TagContext context = scriptEntry.getContext();
             Argument arg = preprocArgs.get(i);
-            if (DenizenCore.implementation.handleCustomArgs(scriptEntry, arg)) {
-                // Do nothing
-            }
-            else if (arg.matchesPrefix("if")) {
-                String tagged = CoreUtilities.toLowerCase(TagManager.tag(arg.getValue(), context));
-                boolean shouldRun = tagged.equals("true") || tagged.equals("!false");
-                if (scriptEntry.dbCallShouldDebug()) {
-                    Debug.echoDebug(scriptEntry, shouldRun ? "'if:' arg passed, command will run." : "'if:' arg returned false, command won't run.");
+            switch (arg.preprocKind) {
+                case Argument.PREPROC_IF -> {
+                    String tagged = CoreUtilities.toLowerCase(preprocValueOf(arg, scriptEntry).toString());
+                    boolean shouldRun = tagged.equals("true") || tagged.equals("!false");
+                    if (scriptEntry.debugThisLine) {
+                        Debug.echoDebug(scriptEntry, shouldRun ? "'if:' arg passed, command will run." : "'if:' arg returned false, command won't run.");
+                    }
+                    if (!shouldRun) {
+                        scriptEntry.setFinished(true);
+                        return false;
+                    }
                 }
-                if (!shouldRun) {
-                    scriptEntry.setFinished(true);
-                    return false;
+                case Argument.PREPROC_SAVE -> {
+                    scriptEntry.saveName = preprocValueOf(arg, scriptEntry).toString();
+                    if (scriptEntry.debugThisLine) {
+                        Debug.echoDebug(scriptEntry, "...remembering this script entry as '" + scriptEntry.saveName + "'!");
+                    }
                 }
-            }
-            else if (arg.matchesPrefix("save")) {
-                scriptEntry.saveName = TagManager.tag(arg.getValue(), context);
-                if (scriptEntry.dbCallShouldDebug()) {
-                    Debug.echoDebug(scriptEntry, "...remembering this script entry as '" + scriptEntry.saveName + "'!");
-                }
+                default -> DenizenCore.implementation.handleCustomArgs(scriptEntry, arg);
             }
         }
         return true;
+    }
+
+    private static ObjectTag preprocValueOf(Argument arg, ScriptEntry scriptEntry) {
+        ParseableTag parsed = arg.preprocValue;
+        TagContext context = scriptEntry.getContext();
+        if (parsed == null) {
+            parsed = TagManager.parseTextToTag(arg.getValue(), context);
+            arg.preprocValue = parsed;
+        }
+        return parsed.parse(context);
     }
 
     private static boolean reportInvalidArguments(ScriptEntry scriptEntry, AbstractCommand command, Exception e) {
