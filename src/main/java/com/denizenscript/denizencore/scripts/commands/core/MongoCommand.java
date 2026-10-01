@@ -31,6 +31,8 @@ public class MongoCommand extends AbstractCommand implements Holdable {
         setSyntax("mongo [id:<ID>] [connect:<uri> database:<database> collection:<collection>/disconnect/command:<map>/find:<map> (by_id:<id>)/insert:<map>/update:<update> new:<new> (upsert:true/{false})/use_database:<database>/use_collection:<collection>]");
         setRequiredArguments(2, 4);
         isProcedural = false;
+        // Talks to a database over a socket and touches its own connection map, exactly as SQLCommand does - see it.
+        asyncSafe = true;
         autoCompile();
     }
 

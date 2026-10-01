@@ -2,9 +2,11 @@ package com.denizenscript.denizencore.scripts.containers;
 
 import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.objects.ObjectTag;
+import com.denizenscript.denizencore.objects.core.DurationTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.objects.core.ScriptTag;
 import com.denizenscript.denizencore.scripts.*;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.tags.ParseableTag;
 import com.denizenscript.denizencore.tags.TagContext;
 import com.denizenscript.denizencore.tags.TagManager;
@@ -13,6 +15,7 @@ import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.Deprecations;
 import com.denizenscript.denizencore.utilities.YamlConfiguration;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 import com.denizenscript.denizencore.utilities.debugging.Debuggable;
@@ -22,6 +25,7 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class ScriptContainer implements Debuggable {
 
@@ -270,7 +274,7 @@ public class ScriptContainer implements Debuggable {
     }
 
     public boolean contains(String path, Class type) {
-        return contains(path, type, DebugInternals.getClassNameOpti(type));
+        return contains(path, type, null);
     }
 
     public boolean contains(String path, Class type, String typeName) {
@@ -284,7 +288,7 @@ public class ScriptContainer implements Debuggable {
         if (type == YamlConfiguration.class) {
             return o instanceof Map;
         }
-        Debug.echoError("Script '<Y>" + getName() + "<W>' contains path '<Y>" + path + "<W>' but it is not required type '<Y>" + typeName + "<W>'");
+        Debug.echoError("Script '<Y>" + getName() + "<W>' contains path '<Y>" + path + "<W>' but it is not required type '<Y>" + (typeName != null ? typeName : DebugInternals.getClassNameOpti(type)) + "<W>'");
         return false;
     }
 
@@ -342,27 +346,125 @@ public class ScriptContainer implements Debuggable {
         contents.set(path, object);
     }
 
+    public static final long NO_SPEED_SET = Long.MIN_VALUE + 1;
+
+    private volatile long speedTicks = Long.MIN_VALUE;
+
+    private final Map<String, ObjectTag> dataKeyForms = new ConcurrentHashMap<>();
+
+    public ObjectTag dataKeyTagForm(String key, YamlConfiguration section, TagContext context) {
+        ObjectTag cached = dataKeyForms.get(key);
+        if (cached != null) {
+            return cached;
+        }
+        Object raw = section.get(key);
+        if (raw == null) {
+            return null;
+        }
+        ObjectTag form = CoreUtilities.objectToTagForm(raw, context, true);
+        if (form == null) {
+            return null;
+        }
+        dataKeyForms.put(key, form);
+        return form;
+    }
+
+    private static final String[] NO_DEFINITION_NAMES = new String[0];
+
+    private volatile String[] definitionNames;
+
+    private volatile StringHolder[] definitionHolders;
+
+    /** {@link #getDefinitionNames()} as pre-lowered keys, so a caller binding them does not scan the text again per call. */
+    public StringHolder[] getDefinitionHolders() {
+        StringHolder[] cached = definitionHolders;
+        if (cached != null) {
+            return cached.length == 0 ? null : cached;
+        }
+        String[] names = getDefinitionNames();
+        if (names == null) {
+            definitionHolders = NO_DEFINITION_HOLDERS;
+            return null;
+        }
+        cached = new StringHolder[names.length];
+        for (int i = 0; i < names.length; i++) {
+            cached[i] = new StringHolder(names[i]);
+        }
+        definitionHolders = cached;
+        return cached;
+    }
+
+    private static final StringHolder[] NO_DEFINITION_HOLDERS = new StringHolder[0];
+
+    public String[] getDefinitionNames() {
+        String[] cached = definitionNames;
+        if (cached == null) {
+            if (contains("definitions", String.class)) {
+                List<String> split = CoreUtilities.split(getString("definitions"), '|');
+                cached = new String[split.size()];
+                for (int i = 0; i < cached.length; i++) {
+                    String name = split.get(i).trim();
+                    int squareBracket = name.indexOf('[');
+                    cached[i] = squareBracket == -1 ? name : name.substring(0, squareBracket).trim();
+                }
+            }
+            else {
+                cached = NO_DEFINITION_NAMES;
+            }
+            definitionNames = cached;
+        }
+        return cached.length == 0 ? null : cached;
+    }
+
+    public long getSpeedTicks() {
+        long cached = speedTicks;
+        if (cached != Long.MIN_VALUE) {
+            return cached;
+        }
+        long computed = NO_SPEED_SET;
+        if (contains("SPEED", String.class)) {
+            DurationTag parsed = DurationTag.valueOf(getString("SPEED", "0"), DenizenCore.implementation.getTagContext(this));
+            if (parsed != null) {
+                computed = parsed.getTicks();
+            }
+        }
+        speedTicks = computed;
+        return computed;
+    }
+
     public List<ScriptEntry> getBaseEntries(ScriptEntryData data) {
+        return getBaseEntries(data, null);
+    }
+
+    public List<ScriptEntry> getBaseEntries(ScriptEntryData data, ScriptQueue intoQueue) {
         // Note: no separate cache field for this one - 'getSetFor' already caches, in a map that can be read from any thread.
-        return cleanDup(data, getSetFor("script"));
+        return cleanDup(data, getSetFor("script"), intoQueue);
     }
 
     public static List<ScriptEntry> cleanDup(ScriptEntryData data, ScriptEntrySet set) {
+        return cleanDup(data, set, null);
+    }
+
+    public static List<ScriptEntry> cleanDup(ScriptEntryData data, ScriptEntrySet set, ScriptQueue intoQueue) {
         if (set == null) {
             return null;
         }
         List<ScriptEntry> entries = new ArrayList<>(set.entries.size());
         for (ScriptEntry entry : set.entries) {
-            entries.add(entry.cloneWithData(data));
+            entries.add(entry.cloneWithData(data, intoQueue));
         }
         return entries;
     }
 
     public List<ScriptEntry> getEntries(ScriptEntryData data, String path) {
+        return getEntries(data, path, null);
+    }
+
+    public List<ScriptEntry> getEntries(ScriptEntryData data, String path, ScriptQueue intoQueue) {
         if (path == null) {
             path = "script";
         }
-        return cleanDup(data, getSetFor(path));
+        return cleanDup(data, getSetFor(path), intoQueue);
     }
 
     public ScriptEntrySet getSetFor(String path) {
@@ -385,7 +487,7 @@ public class ScriptContainer implements Debuggable {
     }
 
     /** Cache of built script entry sets per path. Concurrent, as scripts can be launched from other threads. */
-    private final Map<String, ScriptEntrySet> scriptsMap = new java.util.concurrent.ConcurrentHashMap<>();
+    private final Map<String, ScriptEntrySet> scriptsMap = new ConcurrentHashMap<>();
 
     /////////////
     // DEBUGGABLE

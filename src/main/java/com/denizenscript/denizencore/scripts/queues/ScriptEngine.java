@@ -8,14 +8,19 @@ import com.denizenscript.denizencore.scripts.ScriptEntry;
 
 public class ScriptEngine {
 
+    /**
+     * Kept small on purpose: revolve calls this for every line, and that call site is not counted as hot, so anything
+     * over MaxInlineSize (35 bytes) becomes a real call per line. The waiting case lives in {@link #holdForWaitingEntry}.
+     */
     static boolean shouldHold(ScriptQueue scriptQueue) {
-        if (scriptQueue instanceof TimedQueue && ((TimedQueue) scriptQueue).isPaused()) {
+        if (scriptQueue instanceof TimedQueue timed && timed.isPaused()) {
             return true;
         }
         ScriptEntry last = scriptQueue.getLastEntryExecuted();
-        if (last == null || !last.shouldWaitFor()) {
-            return false;
-        }
+        return last != null && last.shouldWaitFor() && holdForWaitingEntry(scriptQueue);
+    }
+
+    private static boolean holdForWaitingEntry(ScriptQueue scriptQueue) {
         if (!(scriptQueue instanceof TimedQueue)) {
             if (scriptQueue.replacementQueue != null) {
                 // Already converted (eg by an async '~' command converting it up-front) - converting again would strand a duplicate queue.

@@ -293,6 +293,131 @@ public class ElementTag implements ObjectTag {
 
     private BigDecimal decimalCache;
 
+    private long fixedUnscaled;
+
+    private int fixedScale;
+
+    private volatile byte fixedState;
+
+    private boolean resolveFixed() {
+        byte state = fixedState;
+        if (state != 0) {
+            return state == 1;
+        }
+        Object src = source;
+        if (src instanceof Long value) {
+            fixedUnscaled = value.longValue();
+            fixedScale = 0;
+            fixedState = 1;
+            return true;
+        }
+        try {
+            BigDecimal parsed = parsedDecimal();
+            int scale = parsed.scale();
+            if (scale >= 0 && scale <= 18) {
+                fixedUnscaled = parsed.unscaledValue().longValueExact();
+                fixedScale = scale;
+                fixedState = 1;
+                return true;
+            }
+        }
+        catch (Throwable ex) {
+        }
+        fixedState = 2;
+        return false;
+    }
+
+    private static ElementTag compareDecimals(Attribute attribute, ElementTag left, ElementTag right, int mode) {
+        BigDecimal leftValue, rightValue;
+        try {
+            leftValue = left.asBigDecimalRaw();
+            rightValue = right.asBigDecimalRaw();
+        }
+        catch (NumberFormatException ex) {
+            attribute.echoError("Element '" + left + "' or '" + right + "' is not a valid decimal number!");
+            return null;
+        }
+        int result = leftValue.compareTo(rightValue);
+        return new ElementTag(switch (mode) {
+            case 0 -> result > 0;
+            case 1 -> result < 0;
+            case 2 -> result >= 0;
+            default -> result <= 0;
+        });
+    }
+
+    private static int longDigits(long value) {
+        long abs = value < 0 ? -value : value;
+        int low = 0, high = TEN_POWERS.length - 1;
+        while (low < high) {
+            int mid = (low + high + 1) >>> 1;
+            if (abs >= TEN_POWERS[mid]) {
+                low = mid;
+            }
+            else {
+                high = mid - 1;
+            }
+        }
+        return low + 1;
+    }
+
+    private static final long[] TEN_POWERS = {1L, 10L, 100L, 1000L, 10000L, 100000L, 1000000L, 10000000L, 100000000L, 1000000000L,
+            10000000000L, 100000000000L, 1000000000000L, 10000000000000L, 100000000000000L, 1000000000000000L,
+            10000000000000000L, 100000000000000000L, 1000000000000000000L};
+
+    private static ElementTag fixedResult(long unscaled, int scale) {
+        if (unscaled == 0 || unscaled == Long.MIN_VALUE) {
+            return null;
+        }
+        while (scale > 0) {
+            long shortened = unscaled / 10;
+            if (shortened * 10 != unscaled) {
+                break;
+            }
+            unscaled = shortened;
+            scale--;
+        }
+        if (scale == 0) {
+            return decimalOf(unscaled);
+        }
+        if (scale > 6 && longDigits(unscaled) - 1 - scale < -6) {
+            return null;
+        }
+        return new ElementTag(BigDecimal.valueOf(unscaled, scale));
+    }
+
+    private static ElementTag fixedAddSub(ElementTag first, ElementTag second, boolean subtract) {
+        int scale = Math.max(first.fixedScale, second.fixedScale);
+        if (scale > 18) {
+            return null;
+        }
+        long unscaled;
+        try {
+            long left = Math.multiplyExact(first.fixedUnscaled, TEN_POWERS[scale - first.fixedScale]);
+            long right = Math.multiplyExact(second.fixedUnscaled, TEN_POWERS[scale - second.fixedScale]);
+            unscaled = subtract ? Math.subtractExact(left, right) : Math.addExact(left, right);
+        }
+        catch (ArithmeticException ex) {
+            return null;
+        }
+        return fixedResult(unscaled, scale);
+    }
+
+    private static ElementTag fixedMultiply(ElementTag first, ElementTag second) {
+        int scale = first.fixedScale + second.fixedScale;
+        if (scale > 18) {
+            return null;
+        }
+        long unscaled;
+        try {
+            unscaled = Math.multiplyExact(first.fixedUnscaled, second.fixedUnscaled);
+        }
+        catch (ArithmeticException ex) {
+            return null;
+        }
+        return fixedResult(unscaled, scale);
+    }
+
     private BigDecimal parsedDecimal() {
         BigDecimal parsed = decimalCache;
         if (parsed == null) {
@@ -626,7 +751,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_more_than", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) > 0);
+            return compareDecimals(attribute, object, compareVal, 0);
         });
 
         // <--[tag]
@@ -639,7 +764,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_less_than", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) < 0);
+            return compareDecimals(attribute, object, compareVal, 1);
         });
 
         // <--[tag]
@@ -652,7 +777,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_more_than_or_equal_to", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) >= 0);
+            return compareDecimals(attribute, object, compareVal, 2);
         });
 
         // <--[tag]
@@ -665,7 +790,7 @@ public class ElementTag implements ObjectTag {
         // You should never ever use this tag inside any 'if', 'while', etc. command.
         // -->
         tagProcessor.registerStaticTag(ElementTag.class, ElementTag.class, "is_less_than_or_equal_to", (attribute, object, compareVal) -> {
-            return new ElementTag(object.asBigDecimalRaw().compareTo(compareVal.asBigDecimalRaw()) <= 0);
+            return compareDecimals(attribute, object, compareVal, 3);
         });
 
         // <--[tag]
@@ -1980,6 +2105,12 @@ public class ElementTag implements ObjectTag {
                 catch (ArithmeticException e) {
                 }
             }
+            if (object.resolveFixed() && second.resolveFixed()) {
+                ElementTag fastResult = fixedAddSub(object, second, false);
+                if (fastResult != null) {
+                    return fastResult;
+                }
+            }
             try {
                 BigDecimal result = object.asBigDecimalRaw().add(second.asBigDecimalRaw());
                 if (wouldFormatScientific(result)) {
@@ -2087,6 +2218,12 @@ public class ElementTag implements ObjectTag {
                 catch (ArithmeticException e) {
                 }
             }
+            if (object.resolveFixed() && second.resolveFixed()) {
+                ElementTag fastResult = fixedMultiply(object, second);
+                if (fastResult != null) {
+                    return fastResult;
+                }
+            }
             try {
                 BigDecimal result = object.asBigDecimalRaw().multiply(second.asBigDecimalRaw());
                 if (wouldFormatScientific(result)) {
@@ -2120,6 +2257,12 @@ public class ElementTag implements ObjectTag {
                     return decimalOf(Math.subtractExact(objectLong, secondLong));
                 }
                 catch (ArithmeticException e) {
+                }
+            }
+            if (object.resolveFixed() && second.resolveFixed()) {
+                ElementTag fastResult = fixedAddSub(object, second, true);
+                if (fastResult != null) {
+                    return fastResult;
                 }
             }
             try {

@@ -29,7 +29,11 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         }
     }
 
+    public record TypedParam(Object token, ObjectTag value) {}
+
     public static class AttributeComponent {
+
+        public volatile TypedParam typedParam;
 
         public final String rawKey;
 
@@ -152,13 +156,11 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     String origin;
 
-    public ArrayList<String> seemingSuccesses;
+    /** Only ever the most recent one: the error path reads just the last, so a list would allocate on a hot failure path for nothing. */
+    public String lastSeemingSuccess;
 
     public void addSeemingSuccess(String text) {
-        if (seemingSuccesses == null) {
-            seemingSuccesses = new ArrayList<>(2);
-        }
-        seemingSuccesses.add(text);
+        lastSeemingSuccess = text;
     }
 
     /* Referenced by TagCodeGenerator */
@@ -177,9 +179,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         if (CoreConfiguration.debugVerbose) {
             Debug.echoError("(Verbose) Attribute - error track reset");
         }
-        if (seemingSuccesses != null && !seemingSuccesses.isEmpty()) {
-            seemingSuccesses.clear();
-        }
+        lastSeemingSuccess = null;
         hasContextFailed = false;
     }
 
@@ -299,7 +299,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     }
 
     public final boolean startsWith(String string, int attribute) {
-        return CoreUtilities.toLowerCase(getAttributeWithoutParam(attribute)).equals(string);
+        return getAttributeWithoutParam(attribute).equals(string);
     }
 
     public final boolean isComplete() {
@@ -337,6 +337,24 @@ public class Attribute implements TagContext.ShowErrorsMethod {
             if (filled != null) {
                 filled[fulfilled] = 2;
             }
+        }
+    }
+
+    public final ObjectTag typedParamFor(Object token) {
+        if (fulfilled >= attributes.length) {
+            return null;
+        }
+        TypedParam memo = attributes[fulfilled].typedParam;
+        return memo != null && memo.token() == token ? memo.value() : null;
+    }
+
+    public final void rememberTypedParam(Object token, ObjectTag value) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        if (component.paramParsed != null && component.paramParsed.rawObject != null) {
+            component.typedParam = new TypedParam(token, value);
         }
     }
 

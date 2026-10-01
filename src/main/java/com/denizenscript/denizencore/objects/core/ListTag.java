@@ -367,7 +367,7 @@ public class ListTag implements List<String>, ObjectTag {
             return null;
         }
         ListTag list;
-        if (string.startsWith("map@")) {
+        if (string.startsWith("map@") && !hasUnbracketedPipe(string)) {
             MapTag map = MapTag.valueOf(string, context);
             list = new ListTag();
             if (map == null) {
@@ -379,6 +379,25 @@ public class ListTag implements List<String>, ObjectTag {
             return list;
         }
         return new ListTag(string.startsWith("li@") ? string.substring("li@".length()) : string, context);
+    }
+
+    private static boolean hasUnbracketedPipe(String string) {
+        int brackets = 0;
+        for (int i = 0; i < string.length(); i++) {
+            char chr = string.charAt(i);
+            if (chr == '[') {
+                brackets++;
+            }
+            else if (chr == ']') {
+                if (brackets > 0) {
+                    brackets--;
+                }
+            }
+            else if (brackets == 0 && chr == '|') {
+                return true;
+            }
+        }
+        return false;
     }
 
     public static ListTag getListFor(ObjectTag inp, TagContext context) {
@@ -2424,18 +2443,10 @@ public class ListTag implements List<String>, ObjectTag {
                     definitions.addObject(o1);
                     definitions.addObject(o2);
                     definitions.addAll(context_send);
-                    String[] definition_names = null;
-                    try {
-                        definition_names = script.getString("definitions").split("\\|");
-                    }
-                    catch (Exception e) { /* IGNORE */ }
+                    String[] definition_names = script.getDefinitionNames();
                     for (String definition : definitions) {
                         String name = definition_names != null && definition_names.length >= x ?
-                                definition_names[x - 1].trim() : String.valueOf(x);
-                        int squareBracket = name.indexOf('[');
-                        if (squareBracket != -1) {
-                            name = name.substring(0, squareBracket).trim();
-                        }
+                                definition_names[x - 1] : String.valueOf(x);
                         queue.addDefinition(name, definition);
                         if (ScriptUtilities.shouldDebugDefinition(entries.get(0), script, name)) {
                             Debug.echoDebug(entries.get(0), "Adding definition '" + name + "' as " + definition);

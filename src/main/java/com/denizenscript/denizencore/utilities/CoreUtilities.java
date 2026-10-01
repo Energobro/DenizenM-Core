@@ -720,29 +720,27 @@ public class CoreUtilities {
         return true;
     }
 
+    private static final char MICRO_SIGN = 0xB5;
+
     public static String toUpperCase(String input) {
         int len = input.length();
         char c;
         int first = -1;
-        boolean mustUseString = false;
         for (int i = 0; i < len; i++) {
             c = input.charAt(i);
             if (c >= 'a' && c <= 'z') {
-                first = i;
-                break;
+                if (first == -1) {
+                    first = i;
+                }
             }
             else if (c > 128) {
-                if ((c >= 0x400 && c <= 0x42F) || (c >= 0xC0 && c <= 0xDE)) {
+                if ((c < 0xC0 && c != MICRO_SIGN) || (c >= 0x400 && c <= 0x42F) || (c >= 0xC0 && c <= 0xDE)) {
                     continue;
                 }
-                if ((c >= 0x430 && c <= 0x45F) || (c >= 0xDF && c <= 0xFF) || Character.isLowerCase(c)) {
-                    mustUseString = true;
-                    break;
+                if ((c >= 0x430 && c <= 0x45F) || (c >= 0xDF && c <= 0xFF) || Character.isLowerCase(c) || Character.isTitleCase(c)) {
+                    return input.toUpperCase(Locale.ROOT);
                 }
             }
-        }
-        if (mustUseString) {
-            return input.toUpperCase();
         }
         if (first == -1) {
             return input;
@@ -760,25 +758,21 @@ public class CoreUtilities {
         int len = input.length();
         char c;
         int first = -1;
-        boolean mustUseString = false;
         for (int i = 0; i < len; i++) {
             c = input.charAt(i);
             if (c >= 'A' && c <= 'Z') {
-                first = i;
-                break;
+                if (first == -1) {
+                    first = i;
+                }
             }
             else if (c > 128) {
-                if ((c >= 0x430 && c <= 0x45F) || (c >= 0xDF && c <= 0xFF)) {
+                if (c < 0xC0 || (c >= 0x430 && c <= 0x45F) || (c >= 0xDF && c <= 0xFF)) {
                     continue;
                 }
-                if ((c >= 0x400 && c <= 0x42F) || (c >= 0xC0 && c <= 0xDE) || Character.isUpperCase(c)) {
-                    mustUseString = true;
-                    break;
+                if ((c >= 0x400 && c <= 0x42F) || (c >= 0xC0 && c <= 0xDE) || Character.isUpperCase(c) || Character.isTitleCase(c)) {
+                    return input.toLowerCase(Locale.ROOT);
                 }
             }
-        }
-        if (mustUseString) {
-            return input.toLowerCase();
         }
         if (first == -1) {
             return input;

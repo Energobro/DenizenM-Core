@@ -3,6 +3,7 @@ package com.denizenscript.denizencore.utilities;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.MapTag;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 public class SimpleDefinitionProvider implements DefinitionProvider {
 
@@ -41,6 +42,27 @@ public class SimpleDefinitionProvider implements DefinitionProvider {
             return null;
         }
         return definitions.getDeepObject(definition);
+    }
+
+    /** Reads by a key the caller already lowered, so the holder is not rebuilt and the text not scanned again. */
+    @Override
+    public ObjectTag getDefinitionObject(StringHolder definition) {
+        if (definition == null) {
+            return null;
+        }
+        if (!CoreUtilities.contains(definition.low, '.')) {
+            return definitions.getObject(definition);
+        }
+        return definitions.getDeepObject(definition.str);
+    }
+
+    public void addDefinition(StringHolder definition, ObjectTag value) {
+        if (!CoreUtilities.contains(definition.low, '.')) {
+            definitions.putObject(definition, value);
+        }
+        else {
+            definitions.putDeepObject(definition.str, value);
+        }
     }
 
     @Override

@@ -78,20 +78,10 @@ public class MapTag implements ObjectTag {
             return result;
         }
         if (string.endsWith("|")) {
-            int pipe = string.indexOf('|');
-            int lastPipe = 0;
-            while (pipe != -1) {
-                int slash = string.indexOf('/', lastPipe);
-                if (slash == -1 || slash > pipe) {
-                    return null;
-                }
-                String key = string.substring(lastPipe, slash);
-                String value = string.substring(slash + 1, pipe);
-                result.putObject(unescapeLegacyEntry(key), ObjectFetcher.pickObjectFor(unescapeLegacyEntry(value), context));
-                lastPipe = pipe + 1;
-                pipe = string.indexOf('|', lastPipe);
+            MapTag legacy = legacyPipeMap(string, context);
+            if (legacy != null) {
+                return legacy;
             }
-            return result;
         }
         boolean hasBrackets = string.startsWith("[") && string.endsWith("]");
         if (!hasBrackets && string.contains("=")) {
@@ -118,6 +108,24 @@ public class MapTag implements ObjectTag {
             return result;
         }
         return null;
+    }
+
+    private static MapTag legacyPipeMap(String string, TagContext context) {
+        MapTag result = new MapTag();
+        int pipe = string.indexOf('|');
+        int lastPipe = 0;
+        while (pipe != -1) {
+            int slash = string.indexOf('/', lastPipe);
+            if (slash == -1 || slash > pipe) {
+                return null;
+            }
+            String key = string.substring(lastPipe, slash);
+            String value = string.substring(slash + 1, pipe);
+            result.putObject(unescapeLegacyEntry(key), ObjectFetcher.pickObjectFor(unescapeLegacyEntry(value), context));
+            lastPipe = pipe + 1;
+            pipe = string.indexOf('|', lastPipe);
+        }
+        return result;
     }
 
     public static MapTag getMapFor(ObjectTag inp, TagContext context) {

@@ -102,49 +102,43 @@ public class ScriptUtilities {
         if (data == null) {
             data = DenizenCore.implementation.getEmptyScriptEntryData();
         }
-        List<ScriptEntry> entries;
-        if (path == null) {
-            entries = container.getBaseEntries(data.clone());
+        long speedTicks;
+        if (speed != null) {
+            speedTicks = speed.getTicks();
         }
         else {
-            entries = container.getEntries(data.clone(), path);
-        }
-        if (entries == null) {
-            return null;
+            speedTicks = container.getSpeedTicks();
+            if (speedTicks == ScriptContainer.NO_SPEED_SET) {
+                speedTicks = (long) (CoreConfiguration.scriptQueueSpeed * 20);
+            }
         }
         ScriptQueue queue;
-        if (speed == null) {
-            if (container.contains("SPEED", String.class)) {
-                speed = DurationTag.valueOf(container.getString("SPEED", "0"), DenizenCore.implementation.getTagContext(container));
-            }
-            if (speed == null) {
-                speed = new DurationTag(CoreConfiguration.scriptQueueSpeed);
-            }
-        }
         if (async && CoreConfiguration.allowAsyncScripts) {
-            queue = new AsyncQueue(id, speed.getTicks());
+            queue = new AsyncQueue(id, speedTicks);
         }
-        else if (speed.getTicks() > 0) {
-            queue = new TimedQueue(id).setSpeed(speed.getTicks());
+        else if (speedTicks > 0) {
+            queue = new TimedQueue(id).setSpeed(speedTicks);
         }
         else {
             queue = new InstantQueue(id);
         }
-        queue.addEntries(entries);
         queue.contextSource = context;
+        List<ScriptEntry> entries;
+        if (path == null) {
+            entries = container.getBaseEntries(data, queue);
+        }
+        else {
+            entries = container.getEntries(data, path, queue);
+        }
+        if (entries == null) {
+            return null;
+        }
+        queue.addEntries(entries);
         if (definitions != null) {
-            List<String> definition_names = null;
-            if (container.contains("definitions", String.class)) {
-                String str = container.getString("definitions");
-                definition_names = CoreUtilities.split(str, '|');
-            }
+            String[] definitionNames = container.getDefinitionNames();
             int x = 1;
             for (ObjectTag definition : definitions.objectForms) {
-                String name = definition_names != null && definition_names.size() >= x ? definition_names.get(x - 1).trim() : String.valueOf(x);
-                int squareBracket = name.indexOf('[');
-                if (squareBracket != -1) {
-                    name = name.substring(0, squareBracket).trim();
-                }
+                String name = definitionNames != null && definitionNames.length >= x ? definitionNames[x - 1] : String.valueOf(x);
                 queue.addDefinition(name, definition);
                 if (shouldDebugDefinition(debugDefinitions, container, name)) {
                     Debug.echoDebug(debugDefinitions, "Adding definition '" + name + "' as " + definition);
@@ -178,12 +172,7 @@ public class ScriptUtilities {
         List<ScriptEntry> cleanedEntries = new ArrayList<>();
         ScriptQueue queue = async && CoreConfiguration.allowAsyncScripts ? new AsyncQueue(id) : new InstantQueue(id);
         for (ScriptEntry entry : entries) {
-            ScriptEntry newEntry = entry.clone();
-            newEntry.queue = queue;
-            newEntry.entryData = data.clone();
-            newEntry.entryData.scriptEntry = newEntry;
-            newEntry.updateContext();
-            cleanedEntries.add(newEntry);
+            cleanedEntries.add(entry.cloneWithData(data, queue));
         }
         queue.addEntries(cleanedEntries);
         queue.contextSource = context;

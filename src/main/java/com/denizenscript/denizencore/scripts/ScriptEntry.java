@@ -512,12 +512,19 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
      * so that discarded pair was one of the most-repeated allocations in the engine.
      */
     public ScriptEntry cloneWithData(ScriptEntryData data) {
+        return cloneWithData(data, null);
+    }
+
+    public ScriptEntry cloneWithData(ScriptEntryData data, ScriptQueue intoQueue) {
         try {
             ScriptEntry se = (ScriptEntry) super.clone();
             se.inlinedBody = null;
             se.inlinedBranches = null;
             se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
             se.entryData = data.clone();
+            if (intoQueue != null) {
+                se.setSendingQueue(intoQueue);
+            }
             se.updateContext();
             se.entryData.scriptEntry = se;
             return se;
