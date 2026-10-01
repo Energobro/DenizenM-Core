@@ -711,7 +711,43 @@ public class ListTag implements List<String>, ObjectTag {
         return dScriptArg.substring(0, dScriptArg.length() - spacer.length());
     }
 
+    public int resolvePlainIndex(int token, Attribute attribute, boolean strict) {
+        int size = size();
+        if (size == 0) {
+            if (strict) {
+                attribute.echoError("Invalid index parse, list is empty.");
+                return -1;
+            }
+            return 0;
+        }
+        if (token == Attribute.PLAIN_INDEX_LAST) {
+            return size - 1;
+        }
+        if (token == Attribute.PLAIN_INDEX_FIRST) {
+            return 0;
+        }
+        if (token < 0) {
+            return Math.max(0, size + token);
+        }
+        if (token == 0) {
+            attribute.echoError("Invalid index '0': lists start at index 1.");
+            return 0;
+        }
+        if (token > size) {
+            if (strict) {
+                attribute.echoError("Invalid index '" + token + "': list only has " + size + " entries in it.");
+                return -1;
+            }
+            return size;
+        }
+        return token - 1;
+    }
+
     public int parseIndex(String index, Attribute attribute, boolean strict) {
+        int plainToken = Attribute.plainIndexToken(index);
+        if (plainToken != Attribute.PLAIN_INDEX_UNUSABLE) {
+            return resolvePlainIndex(plainToken, attribute, strict);
+        }
         int size = size();
         if (size == 0) {
             if (strict) {
@@ -1580,57 +1616,74 @@ public class ListTag implements List<String>, ObjectTag {
                 return null;
             }
             try {
-                ListTag indices = getListFor(attribute.getParamObject(), attribute.context);
-                if (indices.size() > 1) {
-                    ListTag results = new ListTag();
-                    for (String index : indices) {
-                        int ind = object.parseIndex(index, attribute, true);
-                        if (ind != -1) {
-                            results.addObject(object.getObject(ind));
-                        }
+                int plainToken = attribute.cachedPlainIndexParam();
+                ObjectTag paramObject = null;
+                if (plainToken == Attribute.PLAIN_INDEX_UNRESOLVED || plainToken == Attribute.PLAIN_INDEX_DYNAMIC) {
+                    paramObject = attribute.getParamObject();
+                    int computed = paramObject instanceof ElementTag ? Attribute.plainIndexToken(paramObject.toString()) : Attribute.PLAIN_INDEX_UNUSABLE;
+                    if (plainToken == Attribute.PLAIN_INDEX_UNRESOLVED) {
+                        attribute.rememberPlainIndexParam(computed);
                     }
-                    return results;
+                    plainToken = computed;
                 }
-                if (indices.size() > 0) {
-                    int index = object.parseIndex(indices.get(0), attribute, true);
-                    if (index == -1) {
+                int index;
+                if (plainToken != Attribute.PLAIN_INDEX_UNUSABLE) {
+                    index = object.resolvePlainIndex(plainToken, attribute, true);
+                }
+                else {
+                    ListTag indices = getListFor(paramObject != null ? paramObject : attribute.getParamObject(), attribute.context);
+                    if (indices.size() > 1) {
+                        ListTag results = new ListTag();
+                        for (String each : indices) {
+                            int ind = object.parseIndex(each, attribute, true);
+                            if (ind != -1) {
+                                results.addObject(object.getObject(ind));
+                            }
+                        }
+                        return results;
+                    }
+                    if (indices.isEmpty()) {
                         return null;
                     }
+                    index = object.parseIndex(indices.get(0), attribute, true);
+                }
+                if (index == -1) {
+                    return null;
+                }
 
-                    // <--[tag]
-                    // @attribute <ListTag.get[<#>].to[<#>]>
-                    // @returns ListTag
-                    // @description
-                    // Returns all elements in the range from the first index to the second.
-                    // Note the index input options described at <@link objecttype listtag>
-                    // @Example
-                    // # Narrates a list of "one|two|three"
-                    // - narrate <list[one|two|three|four].get[1].to[3]>
-                    // @Example
-                    // # Narrates a list of "three|four"
-                    // - narrate <list[one|two|three|four].get[3].to[last]>
-                    // @Example
-                    // # Narrates a list of "three|four"
-                    // - narrate <list[one|two|three|four].get[-2].to[-1]>
-                    // -->
-                    if (attribute.startsWith("to", 2) && attribute.hasContext(2)) {
-                        int index2 = object.parseIndex(attribute.getContext(2), attribute, false);
-                        if (index2 == -1) {
-                            return null;
-                        }
-                        if (index2 >= object.size()) {
-                            index2 = object.size() - 1;
-                        }
-                        ListTag newList = new ListTag();
-                        for (int i = index; i <= index2; i++) {
-                            newList.addObject(object.getObject(i));
-                        }
-                        attribute.fulfill(1);
-                        return newList;
+                // <--[tag]
+                // @attribute <ListTag.get[<#>].to[<#>]>
+                // @returns ListTag
+                // @description
+                // Returns all elements in the range from the first index to the second.
+                // Note the index input options described at <@link objecttype listtag>
+                // @Example
+                // # Narrates a list of "one|two|three"
+                // - narrate <list[one|two|three|four].get[1].to[3]>
+                // @Example
+                // # Narrates a list of "three|four"
+                // - narrate <list[one|two|three|four].get[3].to[last]>
+                // @Example
+                // # Narrates a list of "three|four"
+                // - narrate <list[one|two|three|four].get[-2].to[-1]>
+                // -->
+                if (attribute.startsWith("to", 2) && attribute.hasContext(2)) {
+                    int index2 = object.parseIndex(attribute.getContext(2), attribute, false);
+                    if (index2 == -1) {
+                        return null;
                     }
-                    else {
-                        return object.getObject(index);
+                    if (index2 >= object.size()) {
+                        index2 = object.size() - 1;
                     }
+                    ListTag newList = new ListTag();
+                    for (int i = index; i <= index2; i++) {
+                        newList.addObject(object.getObject(i));
+                    }
+                    attribute.fulfill(1);
+                    return newList;
+                }
+                else {
+                    return object.getObject(index);
                 }
             }
             catch (NumberFormatException ex) {

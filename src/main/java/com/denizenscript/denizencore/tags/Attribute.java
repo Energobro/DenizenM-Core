@@ -31,9 +31,15 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     public record TypedParam(Object token, ObjectTag value) {}
 
+    public static final int PLAIN_INDEX_UNRESOLVED = Integer.MIN_VALUE, PLAIN_INDEX_DYNAMIC = Integer.MIN_VALUE + 1, PLAIN_INDEX_UNUSABLE = Integer.MIN_VALUE + 2, PLAIN_INDEX_FIRST = Integer.MIN_VALUE + 3, PLAIN_INDEX_LAST = Integer.MIN_VALUE + 4;
+
     public static class AttributeComponent {
 
         public volatile TypedParam typedParam;
+
+        public volatile int plainIndexParam = PLAIN_INDEX_UNRESOLVED;
+
+        public volatile StringHolder plainKeyParam;
 
         public final String rawKey;
 
@@ -356,6 +362,67 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         if (component.paramParsed != null && component.paramParsed.rawObject != null) {
             component.typedParam = new TypedParam(token, value);
         }
+    }
+
+    public static final StringHolder DYNAMIC_KEY_PARAM = StringHolder.ofLowered(" dynamic");
+
+    public final StringHolder cachedKeyParam() {
+        if (fulfilled >= attributes.length) {
+            return null;
+        }
+        return attributes[fulfilled].plainKeyParam;
+    }
+
+    public final void rememberKeyParam(StringHolder key) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        component.plainKeyParam = component.paramParsed != null && component.paramParsed.rawObject != null ? key : DYNAMIC_KEY_PARAM;
+    }
+
+    public final int cachedPlainIndexParam() {
+        if (fulfilled >= attributes.length) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        return attributes[fulfilled].plainIndexParam;
+    }
+
+    public final void rememberPlainIndexParam(int token) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        component.plainIndexParam = component.paramParsed != null && component.paramParsed.rawObject != null ? token : PLAIN_INDEX_DYNAMIC;
+    }
+
+    public static int plainIndexToken(String input) {
+        int length = input.length();
+        if (length == 0) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        if (length == 4 && CoreUtilities.equalsIgnoreCase(input, "last")) {
+            return PLAIN_INDEX_LAST;
+        }
+        if (length == 5 && CoreUtilities.equalsIgnoreCase(input, "first")) {
+            return PLAIN_INDEX_FIRST;
+        }
+        int at = input.charAt(0) == '-' ? 1 : 0;
+        if (at == length || length - at > 9) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        if (input.charAt(at) == '0' && (at == 1 || length > 1)) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        int value = 0;
+        while (at < length) {
+            char c = input.charAt(at++);
+            if (c < '0' || c > '9') {
+                return PLAIN_INDEX_UNUSABLE;
+            }
+            value = value * 10 + (c - '0');
+        }
+        return input.charAt(0) == '-' ? -value : value;
     }
 
     public final boolean hasParam() {
