@@ -328,16 +328,15 @@ public class ElementTag implements ObjectTag {
     }
 
     private static ElementTag compareDecimals(Attribute attribute, ElementTag left, ElementTag right, int mode) {
-        BigDecimal leftValue, rightValue;
+        int result;
         try {
-            leftValue = left.asBigDecimalRaw();
-            rightValue = right.asBigDecimalRaw();
+            Long leftLong = left.asPlainLong(), rightLong = right.asPlainLong();
+            result = leftLong != null && rightLong != null ? Long.compare(leftLong, rightLong) : left.asBigDecimalRaw().compareTo(right.asBigDecimalRaw());
         }
         catch (NumberFormatException ex) {
             attribute.echoError("Element '" + left + "' or '" + right + "' is not a valid decimal number!");
             return null;
         }
-        int result = leftValue.compareTo(rightValue);
         return new ElementTag(switch (mode) {
             case 0 -> result > 0;
             case 1 -> result < 0;
