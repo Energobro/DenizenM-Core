@@ -257,12 +257,40 @@ public class CoreUtilities {
         return result;
     }
 
+    public static boolean hasAsciiLetter(String text) {
+        for (int i = 0; i < text.length(); i++) {
+            char c = text.charAt(i);
+            if ((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z')) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     public static int indexOfIgnoreCase(String text, String findMe, int from) {
-        int max = text.length() - findMe.length();
         int len = findMe.length();
+        int max = text.length() - len;
+        int start = Math.max(from, 0);
+        if (len == 0) {
+            return start <= max ? start : -1;
+        }
+        if (!hasAsciiLetter(findMe)) {
+            return text.indexOf(findMe, start);
+        }
+        char firstLower = findMe.charAt(0), firstUpper = firstLower;
+        if (firstLower >= 'A' && firstLower <= 'Z') {
+            firstLower = (char) (firstLower + 32);
+        }
+        else if (firstLower >= 'a' && firstLower <= 'z') {
+            firstUpper = (char) (firstLower - 32);
+        }
         outer:
-        for (int i = Math.max(from, 0); i <= max; i++) {
-            for (int j = 0; j < len; j++) {
+        for (int i = start; i <= max; i++) {
+            char at = text.charAt(i);
+            if (at != firstLower && at != firstUpper) {
+                continue;
+            }
+            for (int j = 1; j < len; j++) {
                 char a = text.charAt(i + j), b = findMe.charAt(j);
                 if (a != b) {
                     if (a >= 'A' && a <= 'Z') {
@@ -282,6 +310,9 @@ public class CoreUtilities {
     }
 
     public static String replaceIgnoreCase(String original, String findMe, String swapMeIn) {
+        if (!findMe.isEmpty() && !hasAsciiLetter(findMe)) {
+            return replace(original, findMe, swapMeIn);
+        }
         int index = indexOfIgnoreCase(original, findMe, 0);
         if (index == -1) {
             return original;
