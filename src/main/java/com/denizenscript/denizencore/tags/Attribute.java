@@ -457,7 +457,14 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     public static class OverridingDefinitionProvider implements DefinitionProvider {
         public DefinitionProvider originalProvider;
-        public MapTag altDefs = new MapTag();
+        public MapTag altDefs;
+
+        public MapTag altDefs() {
+            if (altDefs == null) {
+                altDefs = new MapTag();
+            }
+            return altDefs;
+        }
 
         public StringHolder slotKeyA, slotKeyB;
 
@@ -477,7 +484,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
                 slotValueB = value;
             }
             else {
-                altDefs.map.put(key, value);
+                altDefs().map.put(key, value);
             }
         }
 
@@ -492,7 +499,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
                 value = slotValueB;
             }
             if (value == null) {
-                return altDefs.map.isEmpty() ? null : altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
+                return altDefs == null || altDefs.map.isEmpty() ? null : altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
             }
             if (dot == -1) {
                 return value;

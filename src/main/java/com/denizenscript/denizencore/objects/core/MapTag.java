@@ -417,6 +417,9 @@ public class MapTag implements ObjectTag {
         map.putAll(otherMap.map);
     }
 
+    public static final StringHolder FILTER_KEY_KEY = StringHolder.ofLowered("filter_key"), FILTER_VALUE_KEY = StringHolder.ofLowered("filter_value"),
+            PARSE_KEY_KEY = StringHolder.ofLowered("parse_key"), PARSE_VALUE_KEY = StringHolder.ofLowered("parse_value");
+
     public static void register() {
 
         // <--[tag]
@@ -538,11 +541,10 @@ public class MapTag implements ObjectTag {
             }
             MapTag newMap = new MapTag(object.size());
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(attribute.context.definitionProvider);
-            StringHolder filterKeyStr = StringHolder.ofLowered("filter_key"), filterValueStr = StringHolder.ofLowered("filter_value");
             try {
                 for (Map.Entry<StringHolder, ObjectTag> entry : object.entrySet()) {
-                    provider.putOverride(filterKeyStr, new ElementTag(entry.getKey().str));
-                    provider.putOverride(filterValueStr, entry.getValue());
+                    provider.putOverride(FILTER_KEY_KEY, new ElementTag(entry.getKey().str));
+                    provider.putOverride(FILTER_VALUE_KEY, entry.getValue());
                     if (CoreUtilities.equalsIgnoreCase(attribute.parseDynamicParam(provider).toString(), "true")) {
                         newMap.putObject(entry.getKey(), entry.getValue());
                     }
@@ -571,11 +573,10 @@ public class MapTag implements ObjectTag {
             }
             MapTag newMap = new MapTag(object.size());
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(attribute.context.definitionProvider);
-            StringHolder parseKeyStr = StringHolder.ofLowered("parse_key"), parseValueStr = StringHolder.ofLowered("parse_value");
             try {
                 for (Map.Entry<StringHolder, ObjectTag> entry : object.entrySet()) {
-                    provider.putOverride(parseKeyStr, new ElementTag(entry.getKey().str));
-                    provider.putOverride(parseValueStr, entry.getValue());
+                    provider.putOverride(PARSE_KEY_KEY, new ElementTag(entry.getKey().str));
+                    provider.putOverride(PARSE_VALUE_KEY, entry.getValue());
                     newMap.putObject(entry.getKey(), attribute.parseDynamicParam(provider));
                 }
             }

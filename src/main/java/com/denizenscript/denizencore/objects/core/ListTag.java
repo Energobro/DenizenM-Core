@@ -804,6 +804,8 @@ public class ListTag implements List<String>, ObjectTag {
         return result;
     }
 
+    public static final StringHolder FILTER_VALUE_KEY = StringHolder.ofLowered("filter_value"), PARSE_VALUE_KEY = StringHolder.ofLowered("parse_value");
+
     public static void register() {
 
         // <--[tag]
@@ -2651,9 +2653,8 @@ public class ListTag implements List<String>, ObjectTag {
             try {
                 String raw = attribute.getRawParam();
                 ParseableTag parseable = TagManager.parseTextToTag(raw, context);
-                StringHolder filterValueStr = StringHolder.ofLowered("filter_value");
                 for (ObjectTag obj : object.objectForms) {
-                    provider.putOverride(filterValueStr, obj);
+                    provider.putOverride(FILTER_VALUE_KEY, obj);
                     if (CoreUtilities.equalsIgnoreCase(parseable.parse(context).toString(), "true")) {
                         newlist.addObject(obj);
                     }
@@ -2690,9 +2691,8 @@ public class ListTag implements List<String>, ObjectTag {
             try {
                 String raw = attribute.getRawParam();
                 ParseableTag parseable = TagManager.parseTextToTag(raw, context);
-                StringHolder parseValueStr = StringHolder.ofLowered("parse_value");
                 for (ObjectTag obj : object.objectForms) {
-                    provider.putOverride(parseValueStr, obj);
+                    provider.putOverride(PARSE_VALUE_KEY, obj);
                     newlist.addObject(parseable.parse(context));
                 }
             }

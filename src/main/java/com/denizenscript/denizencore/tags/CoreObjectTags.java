@@ -188,7 +188,7 @@ public class CoreObjectTags {
                 return null;
             }
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(attribute.context.definitionProvider);
-            provider.altDefs.putObject("null_if_value", object);
+            provider.altDefs().putObject("null_if_value", object);
             if (CoreUtilities.equalsIgnoreCase(attribute.parseDynamicParam(provider).toString(), "true")) {
                 return null;
             }
