@@ -256,6 +256,8 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
 
         public String fastRejectLiteral;
 
+        public int orderIndex;
+
         /**
          * The literal value of the given switch on this path, or null when it has none to reject by.
          * <p>
@@ -650,6 +652,42 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
             int rel = scriptPath.priority - t1.priority;
             return Integer.compare(rel, 0);
         });
+        buildFastRejectIndex();
+    }
+
+    public String fastRejectIndexSwitch;
+
+    public HashMap<String, ScriptPath[]> fastRejectBuckets;
+
+    public ScriptPath[] fastRejectOpenPaths;
+
+    public void buildFastRejectIndex() {
+        fastRejectBuckets = null;
+        fastRejectOpenPaths = null;
+        fastRejectIndexSwitch = fastRejectSwitch();
+        for (int i = 0; i < eventPaths.size(); i++) {
+            eventPaths.get(i).orderIndex = i;
+        }
+        if (fastRejectIndexSwitch == null) {
+            return;
+        }
+        HashMap<String, ArrayList<ScriptPath>> buckets = new HashMap<>();
+        ArrayList<ScriptPath> open = new ArrayList<>();
+        for (ScriptPath path : eventPaths) {
+            String literal = path.fastRejectLiteral(fastRejectIndexSwitch);
+            if (literal == null) {
+                open.add(path);
+            }
+            else {
+                buckets.computeIfAbsent(literal, key -> new ArrayList<>()).add(path);
+            }
+        }
+        HashMap<String, ScriptPath[]> built = new HashMap<>(buckets.size() * 2);
+        for (Map.Entry<String, ArrayList<ScriptPath>> entry : buckets.entrySet()) {
+            built.put(entry.getKey(), entry.getValue().toArray(new ScriptPath[0]));
+        }
+        fastRejectBuckets = built;
+        fastRejectOpenPaths = open.toArray(new ScriptPath[0]);
     }
 
     public void init() {
@@ -873,6 +911,28 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
             String rawValue = fastRejectValue();
             rejectValue = rawValue == null ? null : lowerSwitchValue(rawValue);
         }
+        if (rejectValue != null && fastRejectBuckets != null && rejectSwitch == fastRejectIndexSwitch) {
+            ScriptPath[] bucket = fastRejectBuckets.get(rejectValue);
+            ScriptPath[] open = fastRejectOpenPaths;
+            int atBucket = 0, atOpen = 0;
+            while (true) {
+                boolean haveBucket = bucket != null && atBucket < bucket.length;
+                boolean haveOpen = atOpen < open.length;
+                ScriptPath path;
+                if (haveBucket && (!haveOpen || bucket[atBucket].orderIndex < open[atOpen].orderIndex)) {
+                    path = bucket[atBucket++];
+                }
+                else if (haveOpen) {
+                    path = open[atOpen++];
+                }
+                else {
+                    break;
+                }
+                firePath(copy, path);
+            }
+            copy.perFireContext = null;
+            return copy;
+        }
         for (ScriptPath path : eventPaths) {
             if (rejectValue != null) {
                 String literal = path.fastRejectLiteral(rejectSwitch);
@@ -880,24 +940,27 @@ public abstract class ScriptEvent implements ContextSource, Cloneable {
                     continue;
                 }
             }
-            try {
-                if (matchesScript(copy, path)) {
-                    if (path.fireAfter) {
-                        final ScriptPath finalPath = path;
-                        DenizenCore.schedule(new OneTimeSchedulable(() -> copy.run(finalPath), 0.01f));
-                    }
-                    else {
-                        copy.run(path);
-                    }
-                }
-            }
-            catch (Exception e) {
-                Debug.echoError("Matching script " + path.container.getName() + " event path:" + path.event + ":::");
-                Debug.echoError(e);
-            }
+            firePath(copy, path);
         }
         copy.perFireContext = null;
         return copy;
+    }
+
+    private void firePath(ScriptEvent copy, ScriptPath path) {
+        try {
+            if (matchesScript(copy, path)) {
+                if (path.fireAfter) {
+                    DenizenCore.schedule(new OneTimeSchedulable(() -> copy.run(path), 0.01f));
+                }
+                else {
+                    copy.run(path);
+                }
+            }
+        }
+        catch (Exception e) {
+            Debug.echoError("Matching script " + path.container.getName() + " event path:" + path.event + ":::");
+            Debug.echoError(e);
+        }
     }
 
     public void run(ScriptPath path) {
