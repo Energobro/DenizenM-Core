@@ -205,6 +205,17 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     private Attribute() {
     }
 
+    public final void resetForNextUse() {
+        fulfilled = 0;
+        hadManualFulfill = false;
+        lastValid = null;
+        hasContextFailed = false;
+        lastSeemingSuccess = null;
+        if (filled != null) {
+            Arrays.fill(filled, 0);
+        }
+    }
+
     public static Attribute forRepeatedUse(Attribute ref, ScriptEntry scriptEntry, TagContext preparedContext, boolean hadAlternative) {
         Attribute result = new Attribute();
         result.origin = ref.origin;

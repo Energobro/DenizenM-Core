@@ -2552,8 +2552,9 @@ public class ListTag implements List<String>, ObjectTag {
                 Attribute prepared = new Attribute(subAttribute, entry, attribute.context);
                 prepared.setHadAlternative(true);
                 TagContext perElement = prepared.context;
+                Attribute tempAttrib = Attribute.forRepeatedUse(subAttribute, entry, perElement, true);
                 for (ObjectTag obj : object.objectForms) {
-                    Attribute tempAttrib = Attribute.forRepeatedUse(subAttribute, entry, perElement, true);
+                    tempAttrib.resetForNextUse();
                     ObjectTag objs = CoreUtilities.autoAttribTyped(obj, tempAttrib);
                     if ((objs == null) ? defaultValue : CoreUtilities.equalsIgnoreCase(objs.toString(), "true")) {
                         newlist.addObject(obj);
@@ -2614,8 +2615,9 @@ public class ListTag implements List<String>, ObjectTag {
                 Attribute prepared = new Attribute(subAttribute, entry, attribute.context);
                 prepared.setHadAlternative(hadAlternative);
                 TagContext perElement = prepared.context;
+                Attribute tempAttrib = Attribute.forRepeatedUse(subAttribute, entry, perElement, hadAlternative);
                 for (ObjectTag obj : object.objectForms) {
-                    Attribute tempAttrib = Attribute.forRepeatedUse(subAttribute, entry, perElement, hadAlternative);
+                    tempAttrib.resetForNextUse();
                     ObjectTag objs = CoreUtilities.autoAttribTyped(obj, tempAttrib);
                     if (objs == null) {
                         objs = new ElementTag(defaultValue);
