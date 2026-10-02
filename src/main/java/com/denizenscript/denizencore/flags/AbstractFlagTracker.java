@@ -7,6 +7,7 @@ import com.denizenscript.denizencore.tags.ObjectTagProcessor;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.Deprecations;
 import com.denizenscript.denizencore.utilities.debugging.Warning;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.Collection;
 
@@ -32,6 +33,14 @@ public abstract class AbstractFlagTracker {
     }
 
     public abstract MapTag getRootMap(String key);
+
+    public MapTag getRootMap(StringHolder key) {
+        return getRootMap(key.str);
+    }
+
+    public ObjectTag getFlagValueByPath(StringHolder[] path, String raw) {
+        return getFlagValue(raw);
+    }
 
     public abstract void setRootMap(String key, MapTag map);
 
@@ -184,7 +193,15 @@ public abstract class AbstractFlagTracker {
             return new DurationTag((time.millis() - TimeTag.now().millis()) / 1000.0);
         }
         String flagName = attribute.getParam();
-        ObjectTag retVal = getFlagValue(flagName);
+        StringHolder[] path = attribute.cachedDottedPath();
+        ObjectTag retVal;
+        if (path != null) {
+            retVal = getFlagValueByPath(path, flagName);
+        }
+        else {
+            retVal = getFlagValue(flagName);
+            attribute.rememberDottedPath(flagName);
+        }
         if (retVal == null) {
             attribute.echoError("No flag named '" + flagName + "' (did you forget to set it, or has it already expired? Or did you forget a 'has_flag' check?)");
             return null;

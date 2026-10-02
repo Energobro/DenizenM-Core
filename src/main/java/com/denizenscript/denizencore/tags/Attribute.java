@@ -41,6 +41,8 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
         public volatile StringHolder plainKeyParam;
 
+        public volatile StringHolder[] dottedPath;
+
         public final String rawKey;
 
         public final String key;
@@ -376,6 +378,33 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     }
 
     public static final StringHolder DYNAMIC_KEY_PARAM = StringHolder.ofLowered(" dynamic");
+
+    public final StringHolder[] cachedDottedPath() {
+        if (fulfilled >= attributes.length) {
+            return null;
+        }
+        return attributes[fulfilled].dottedPath;
+    }
+
+    public final void rememberDottedPath(String raw) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        if (component.paramParsed == null || component.paramParsed.rawObject == null) {
+            return;
+        }
+        component.dottedPath = dottedPathOf(CoreUtilities.toLowerCase(raw));
+    }
+
+    public static StringHolder[] dottedPathOf(String lowered) {
+        List<String> segments = CoreUtilities.split(lowered, '.');
+        StringHolder[] path = new StringHolder[segments.size()];
+        for (int i = 0; i < path.length; i++) {
+            path[i] = StringHolder.ofLowered(segments.get(i));
+        }
+        return path;
+    }
 
     public final StringHolder cachedKeyParam() {
         if (fulfilled >= attributes.length) {

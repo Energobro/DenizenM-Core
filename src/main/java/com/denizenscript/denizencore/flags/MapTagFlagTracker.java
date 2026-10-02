@@ -53,6 +53,20 @@ public class MapTagFlagTracker extends MapTagBasedFlagTracker {
     }
 
     @Override
+    public MapTag getRootMap(StringHolder key) {
+        ObjectTag subObj = map.getObject(key);
+        if (subObj == null) {
+            return null;
+        }
+        if (subObj instanceof MapTag) {
+            return (MapTag) subObj;
+        }
+        MapTag toReturn = new MapTag();
+        toReturn.putObject(valueString, subObj);
+        return toReturn;
+    }
+
+    @Override
     public void setRootMap(String key, MapTag value) {
         if (value == null) {
             map.remove(key);
