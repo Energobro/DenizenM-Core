@@ -168,7 +168,18 @@ public abstract class AbstractFlagTracker {
             attribute.echoError("The has_flag[...] tag must have an input!");
             return null;
         }
-        return new ElementTag(hasFlag(attribute.getParam()));
+        String flagName = attribute.getParam();
+        StringHolder[] path = attribute.cachedDottedPath();
+        if (path != null) {
+            return new ElementTag(hasFlagByPath(path, flagName));
+        }
+        boolean result = hasFlag(flagName);
+        attribute.rememberDottedPath(flagName);
+        return new ElementTag(result);
+    }
+
+    public boolean hasFlagByPath(StringHolder[] path, String raw) {
+        return hasFlag(raw);
     }
 
     public ObjectTag doFlagTag(Attribute attribute) {

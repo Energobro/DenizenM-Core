@@ -51,6 +51,11 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
         return path.length == 1 ? getFlagValueOfType(path[0], valueString) : getDeepFlagValueOfType(path, valueString);
     }
 
+    @Override
+    public boolean hasFlagByPath(StringHolder[] path, String raw) {
+        return getFlagValueByPath(path, raw) != null;
+    }
+
     public ObjectTag getFlagValueOfType(StringHolder key, StringHolder type) {
         MapTag map = getRootMap(key);
         if (map == null) {
