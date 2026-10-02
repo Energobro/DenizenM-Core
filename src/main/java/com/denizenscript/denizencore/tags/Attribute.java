@@ -550,6 +550,30 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         }
 
         @Override
+        public ObjectTag getDefinitionObject(StringHolder definition) {
+            if (definition.low.indexOf('.') != -1) {
+                return getDefinitionObject(definition.str);
+            }
+            ObjectTag value = null;
+            if (slotKeyA != null && slotKeyA.low.equals(definition.low)) {
+                value = slotValueA;
+            }
+            else if (slotKeyB != null && slotKeyB.low.equals(definition.low)) {
+                value = slotValueB;
+            }
+            if (value != null) {
+                return value;
+            }
+            if (altDefs != null) {
+                ObjectTag found = altDefs.getObject(definition);
+                if (found != null) {
+                    return found;
+                }
+            }
+            return originalProvider.getDefinitionObject(definition);
+        }
+
+        @Override
         public String getDefinition(String definition) {
             ObjectTag result = findOverride(definition);
             if (result != null) {
