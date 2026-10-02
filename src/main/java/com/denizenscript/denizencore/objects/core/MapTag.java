@@ -679,14 +679,26 @@ public class MapTag implements ObjectTag {
         // - narrate <[mymap.root.leaf]>
         // -->
         TagRunnable.ObjectInterface<MapTag, ObjectTag> deepGetRunnable = (attribute, object) -> {
+            StringHolder cachedKey = attribute.cachedKeyParam();
+            if (cachedKey != null && cachedKey != Attribute.DYNAMIC_KEY_PARAM) {
+                return object.getObject(cachedKey);
+            }
             if (!attribute.hasParam()) {
                 attribute.echoError("The tag 'MapTag.deep_get' must have an input value.");
                 return null;
             }
-            if (attribute.getParam().contains("|")) {
+            String param = attribute.getParam();
+            if (param.indexOf('|') >= 0) {
                 return new ListTag(attribute.paramAsType(ListTag.class), object::getDeepObject);
             }
-            return object.getDeepObject(attribute.getParam());
+            if (param.indexOf('.') >= 0) {
+                return object.getDeepObject(param);
+            }
+            StringHolder key = new StringHolder(param);
+            if (cachedKey == null) {
+                attribute.rememberKeyParam(key);
+            }
+            return object.getObject(key);
         };
         tagProcessor.registerStaticTag(ObjectTag.class, "deep_get", deepGetRunnable);
         tagProcessor.registerStaticTag(ObjectTag.class, "", deepGetRunnable);
