@@ -171,10 +171,7 @@ public class AsyncCommand extends BracedCommand {
                 scriptEntry.setFinished(true);
                 return;
             }
-            ScriptEntry markerEntry = new ScriptEntry("ASYNC", new String[]{"\0CALLBACK"}, scriptEntry.getScriptContainer());
-            markerEntry.copyFrom(scriptEntry);
-            markerEntry.setOwner(scriptEntry);
-            entries.add(markerEntry);
+            entries.add(markerFor(scriptEntry));
             for (ScriptEntry entry : entries) {
                 entry.setInstant(true);
             }
@@ -267,6 +264,18 @@ public class AsyncCommand extends BracedCommand {
      * The first run always goes to a worker, since nothing is known about it yet, and one run that is expensive settles the question for good -
      * the maximum is what's compared, so a block that is usually fast but sometimes slow keeps its thread.
      */
+    private static ScriptEntry markerFor(ScriptEntry scriptEntry) {
+        ScriptEntry.ScriptEntryInternal shared = scriptEntry.sharedInternal();
+        ScriptEntry prototype = shared.asyncMarkerPrototype;
+        if (prototype == null) {
+            prototype = new ScriptEntry("ASYNC", new String[]{"\0CALLBACK"}, scriptEntry.getScriptContainer());
+            shared.asyncMarkerPrototype = prototype;
+        }
+        ScriptEntry marker = prototype.cloneWithDataFrom(scriptEntry);
+        marker.setOwner(scriptEntry);
+        return marker;
+    }
+
     public static boolean isKnownCheap(ScriptEntry scriptEntry, boolean detached) {
         if (detached) {
             // 'detached' is a promise not to wait, which running inline would break no matter how cheap the contents are.

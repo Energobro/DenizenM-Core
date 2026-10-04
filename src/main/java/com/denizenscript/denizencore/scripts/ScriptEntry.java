@@ -108,6 +108,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
          */
         public volatile long asyncBlockMaxNanos = -1;
 
+        public volatile ScriptEntry asyncMarkerPrototype;
+
         /**
          * The internals this one was copied from by {@link #duplicateForAsync}, or null on the original.
          * <p>
