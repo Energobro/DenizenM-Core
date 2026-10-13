@@ -222,10 +222,10 @@ public class AsyncCommand extends BracedCommand {
                         subset.putDeepObject(name, value.duplicate());
                     }
                 }
-                subQueue.definitions = new DefinitionStore(subset);
+                subQueue.setDefinitions(new DefinitionStore(subset));
             }
             else {
-                subQueue.definitions = queue.definitions.duplicate();
+                subQueue.setDefinitions(queue.definitions().duplicate());
             }
         }
         else {
@@ -233,7 +233,7 @@ public class AsyncCommand extends BracedCommand {
             // the two queues is touching this map. Handing it over as-is is therefore safe, and skips a deep copy of every definition the script holds.
             // The one thing this gives up is another script reading '<queue[id].definition[x]>' on the held queue mid-block, which would now
             // be reading a map the worker is writing. That was already an odd thing to do, and it is worth what the copy was costing.
-            subQueue.definitions = queue.definitions;
+            subQueue.setDefinitions(queue.definitions());
         }
         for (ScriptEntry entry : entries) {
             entry.setInstant(true);
@@ -299,13 +299,13 @@ public class AsyncCommand extends BracedCommand {
         for (String key : subQueue.trackedDefinitionWrites) {
             // A definition the block removed reads back as null here, which 'putObject' turns into a removal on the outer queue too.
             StringHolder holder = new StringHolder(key);
-            outerQueue.definitions.putObject(holder, subQueue.definitions.getObject(holder));
+            outerQueue.definitions().putObject(holder, subQueue.definitions().getObject(holder));
         }
     }
 
     /** Applies a finished block's results to the outer queue and releases it. Always runs on the outer queue's own thread. */
     public static void finishBlock(ScriptEntry scriptEntry, ScriptQueue outerQueue, AsyncQueue subQueue, AsyncData data) {
-        outerQueue.definitions = subQueue.definitions;
+        outerQueue.setDefinitions(subQueue.definitions());
         if (subQueue.determinations != null) {
             outerQueue.determinations = subQueue.determinations;
         }

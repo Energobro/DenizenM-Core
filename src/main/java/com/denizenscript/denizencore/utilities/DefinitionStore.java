@@ -188,6 +188,10 @@ public class DefinitionStore {
         }
     }
 
+    public MapTag backingMap() {
+        return map;
+    }
+
     public DefinitionSlots boundTable() {
         return table;
     }

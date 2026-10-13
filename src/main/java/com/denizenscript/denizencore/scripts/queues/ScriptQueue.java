@@ -223,7 +223,31 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
      */
     private long delay_time = 0;
 
-    public DefinitionStore definitions = new DefinitionStore();
+    /**
+     * The queue's definitions, as the plain map that addons compiled against older cores read and replace by field access.
+     * <p>
+     * A field cannot be routed through a getter - the JVM resolves it by name and exact descriptor - so this stays a {@link MapTag}
+     * and {@link #definitions()} hands core the store that wraps it, rebuilding that store whenever this field has been pointed at
+     * a different map. Writing the field is therefore still a way to replace the whole scope, which is what it always meant.
+     */
+    public MapTag definitions = new MapTag();
+
+    private DefinitionStore definitionStore = new DefinitionStore(definitions);
+
+    public DefinitionStore definitions() {
+        DefinitionStore store = definitionStore;
+        if (store.backingMap() != definitions) {
+            store = new DefinitionStore(definitions);
+            definitionStore = store;
+        }
+        return store;
+    }
+
+    /** Hands over a prepared store, so that two queues sharing one map also share its slot cache rather than drifting apart. */
+    public void setDefinitions(DefinitionStore store) {
+        definitionStore = store;
+        definitions = store.backingMap();
+    }
 
     /**
      * If set, every definition written on this queue records its top-level name here.
@@ -368,7 +392,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
                 return value;
             }
         }
-        return definitions.getDeepObject(definition);
+        return definitions().getDeepObject(definition);
     }
 
     @Override
@@ -383,7 +407,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             int dotIndex = definition.indexOf('.');
             trackedDefinitionWrites.add(dotIndex == -1 ? definition : definition.substring(0, dotIndex));
         }
-        definitions.putDeepObject(definition, value);
+        definitions().putDeepObject(definition, value);
     }
 
     @Override
@@ -400,7 +424,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
                 return value;
             }
         }
-        return definitions.getObject(definition);
+        return definitions().getObject(definition);
     }
 
     @Override
@@ -440,7 +464,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (trackedDefinitionWrites != null) {
             trackedDefinitionWrites.add(definition.str);
         }
-        definitions.putObject(definition, value);
+        definitions().putObject(definition, value);
     }
 
     @Override
@@ -455,18 +479,18 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     @Override
     public MapTag getAllDefinitions() {
-        return definitions.toMap();
+        return definitions().toMap();
     }
 
     public ObjectTag getDefinitionDeep(StringHolder[] path) {
-        return definitions.getDeepObject(path);
+        return definitions().getDeepObject(path);
     }
 
     public void addDefinitionDeep(StringHolder[] path, ObjectTag value) {
         if (trackedDefinitionWrites != null) {
             trackedDefinitionWrites.add(path[0].str);
         }
-        definitions.putDeepObject(path, value);
+        definitions().putDeepObject(path, value);
     }
 
     /**
@@ -498,7 +522,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
     }
 
     public ObjectTag getDefinitionSlot(TagManager.ParseableTagPiece tag, StringHolder definition) {
-        DefinitionSlots table = definitions.boundTable();
+        DefinitionSlots table = definitions().boundTable();
         if (table == null) {
             return getDefinitionObject(definition);
         }
@@ -507,11 +531,11 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (binding.slot == DefinitionSlots.NO_SLOT) {
             return getDefinitionObject(definition);
         }
-        return definitions.getSlot(table, binding.slot, definition);
+        return definitions().getSlot(table, binding.slot, definition);
     }
 
     public ObjectTag getDefinitionSlot(Attribute.AttributeComponent component, StringHolder definition) {
-        DefinitionSlots table = definitions.boundTable();
+        DefinitionSlots table = definitions().boundTable();
         if (table == null) {
             return getDefinitionObject(definition);
         }
@@ -520,7 +544,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (binding.slot == DefinitionSlots.NO_SLOT) {
             return getDefinitionObject(definition);
         }
-        return definitions.getSlot(table, binding.slot, definition);
+        return definitions().getSlot(table, binding.slot, definition);
     }
 
     public void addDefinitionPlain(DefinitionSlots table, int slot, StringHolder definition, ObjectTag value) {
@@ -528,10 +552,10 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             trackedDefinitionWrites.add(definition.str);
         }
         if (table == null || slot == DefinitionSlots.NO_SLOT) {
-            definitions.putObject(definition, value);
+            definitions().putObject(definition, value);
             return;
         }
-        definitions.putSlot(table, slot, definition, value);
+        definitions().putSlot(table, slot, definition, value);
     }
 
     public void addDefinitionSlot(DefinitionSlots table, int slot, StringHolder definition, ObjectTag value) {
@@ -542,7 +566,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (trackedDefinitionWrites != null) {
             trackedDefinitionWrites.add(definition.str);
         }
-        definitions.putSlot(table, slot, definition, value);
+        definitions().putSlot(table, slot, definition, value);
     }
 
     public static int slotFor(ScriptEntry owner, StringHolder definition) {
@@ -672,7 +696,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
             newQueue.loopFrames = new ArrayList<>(loopFrames);
         }
         newQueue.determinations = determinations;
-        newQueue.definitions = definitions.duplicate();
+        newQueue.setDefinitions(definitions().duplicate());
         newQueue.setContextSource(contextSource);
         newQueue.determinationTarget = determinationTarget;
         newQueue.setLastEntryExecuted(getLastEntryExecuted());
@@ -889,7 +913,7 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
         if (!entries.isEmpty()) {
             DefinitionSlots table = entries.get(0).internal.slotTable;
             if (table != null) {
-                definitions.bindIfUnbound(table);
+                definitions().bindIfUnbound(table);
             }
         }
     }
