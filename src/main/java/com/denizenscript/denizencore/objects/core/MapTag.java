@@ -78,20 +78,10 @@ public class MapTag implements ObjectTag {
             return result;
         }
         if (string.endsWith("|")) {
-            int pipe = string.indexOf('|');
-            int lastPipe = 0;
-            while (pipe != -1) {
-                int slash = string.indexOf('/', lastPipe);
-                if (slash == -1 || slash > pipe) {
-                    return null;
-                }
-                String key = string.substring(lastPipe, slash);
-                String value = string.substring(slash + 1, pipe);
-                result.putObject(unescapeLegacyEntry(key), ObjectFetcher.pickObjectFor(unescapeLegacyEntry(value), context));
-                lastPipe = pipe + 1;
-                pipe = string.indexOf('|', lastPipe);
+            MapTag legacy = legacyPipeMap(string, context);
+            if (legacy != null) {
+                return legacy;
             }
-            return result;
         }
         boolean hasBrackets = string.startsWith("[") && string.endsWith("]");
         if (!hasBrackets && string.contains("=")) {
@@ -118,6 +108,24 @@ public class MapTag implements ObjectTag {
             return result;
         }
         return null;
+    }
+
+    private static MapTag legacyPipeMap(String string, TagContext context) {
+        MapTag result = new MapTag();
+        int pipe = string.indexOf('|');
+        int lastPipe = 0;
+        while (pipe != -1) {
+            int slash = string.indexOf('/', lastPipe);
+            if (slash == -1 || slash > pipe) {
+                return null;
+            }
+            String key = string.substring(lastPipe, slash);
+            String value = string.substring(slash + 1, pipe);
+            result.putObject(unescapeLegacyEntry(key), ObjectFetcher.pickObjectFor(unescapeLegacyEntry(value), context));
+            lastPipe = pipe + 1;
+            pipe = string.indexOf('|', lastPipe);
+        }
+        return result;
     }
 
     public static MapTag getMapFor(ObjectTag inp, TagContext context) {
@@ -409,6 +417,9 @@ public class MapTag implements ObjectTag {
         map.putAll(otherMap.map);
     }
 
+    public static final StringHolder FILTER_KEY_KEY = StringHolder.ofLowered("filter_key"), FILTER_VALUE_KEY = StringHolder.ofLowered("filter_value"),
+            PARSE_KEY_KEY = StringHolder.ofLowered("parse_key"), PARSE_VALUE_KEY = StringHolder.ofLowered("parse_value");
+
     public static void register() {
 
         // <--[tag]
@@ -530,11 +541,10 @@ public class MapTag implements ObjectTag {
             }
             MapTag newMap = new MapTag(object.size());
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(attribute.context.definitionProvider);
-            StringHolder filterKeyStr = StringHolder.ofLowered("filter_key"), filterValueStr = StringHolder.ofLowered("filter_value");
             try {
                 for (Map.Entry<StringHolder, ObjectTag> entry : object.entrySet()) {
-                    provider.putOverride(filterKeyStr, new ElementTag(entry.getKey().str));
-                    provider.putOverride(filterValueStr, entry.getValue());
+                    provider.putOverride(FILTER_KEY_KEY, new ElementTag(entry.getKey().str));
+                    provider.putOverride(FILTER_VALUE_KEY, entry.getValue());
                     if (CoreUtilities.equalsIgnoreCase(attribute.parseDynamicParam(provider).toString(), "true")) {
                         newMap.putObject(entry.getKey(), entry.getValue());
                     }
@@ -563,11 +573,10 @@ public class MapTag implements ObjectTag {
             }
             MapTag newMap = new MapTag(object.size());
             Attribute.OverridingDefinitionProvider provider = new Attribute.OverridingDefinitionProvider(attribute.context.definitionProvider);
-            StringHolder parseKeyStr = StringHolder.ofLowered("parse_key"), parseValueStr = StringHolder.ofLowered("parse_value");
             try {
                 for (Map.Entry<StringHolder, ObjectTag> entry : object.entrySet()) {
-                    provider.putOverride(parseKeyStr, new ElementTag(entry.getKey().str));
-                    provider.putOverride(parseValueStr, entry.getValue());
+                    provider.putOverride(PARSE_KEY_KEY, new ElementTag(entry.getKey().str));
+                    provider.putOverride(PARSE_VALUE_KEY, entry.getValue());
                     newMap.putObject(entry.getKey(), attribute.parseDynamicParam(provider));
                 }
             }
@@ -632,14 +641,23 @@ public class MapTag implements ObjectTag {
         //     - narrate "One of the values is <[value]>"
         // -->
         tagProcessor.registerStaticTag(ObjectTag.class, "get", (attribute, object) -> {
+            StringHolder cachedKey = attribute.cachedKeyParam();
+            if (cachedKey != null && cachedKey != Attribute.DYNAMIC_KEY_PARAM) {
+                return object.getObject(cachedKey);
+            }
             if (!attribute.hasParam()) {
                 attribute.echoError("The tag 'MapTag.get' must have an input value.");
                 return null;
             }
-            if (attribute.getParam().contains("|")) {
+            String param = attribute.getParam();
+            if (param.indexOf('|') >= 0) {
                 return new ListTag(attribute.paramAsType(ListTag.class), object::getObject);
             }
-            return object.getObject(attribute.getParam());
+            StringHolder key = new StringHolder(param);
+            if (cachedKey == null) {
+                attribute.rememberKeyParam(key);
+            }
+            return object.getObject(key);
         });
 
         // <--[tag]
@@ -661,14 +679,26 @@ public class MapTag implements ObjectTag {
         // - narrate <[mymap.root.leaf]>
         // -->
         TagRunnable.ObjectInterface<MapTag, ObjectTag> deepGetRunnable = (attribute, object) -> {
+            StringHolder cachedKey = attribute.cachedKeyParam();
+            if (cachedKey != null && cachedKey != Attribute.DYNAMIC_KEY_PARAM) {
+                return object.getObject(cachedKey);
+            }
             if (!attribute.hasParam()) {
                 attribute.echoError("The tag 'MapTag.deep_get' must have an input value.");
                 return null;
             }
-            if (attribute.getParam().contains("|")) {
+            String param = attribute.getParam();
+            if (param.indexOf('|') >= 0) {
                 return new ListTag(attribute.paramAsType(ListTag.class), object::getDeepObject);
             }
-            return object.getDeepObject(attribute.getParam());
+            if (param.indexOf('.') >= 0) {
+                return object.getDeepObject(param);
+            }
+            StringHolder key = new StringHolder(param);
+            if (cachedKey == null) {
+                attribute.rememberKeyParam(key);
+            }
+            return object.getObject(key);
         };
         tagProcessor.registerStaticTag(ObjectTag.class, "deep_get", deepGetRunnable);
         tagProcessor.registerStaticTag(ObjectTag.class, "", deepGetRunnable);

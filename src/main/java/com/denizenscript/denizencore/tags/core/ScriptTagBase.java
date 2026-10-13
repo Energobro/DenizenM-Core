@@ -1,6 +1,7 @@
 package com.denizenscript.denizencore.tags.core;
 
 import com.denizenscript.denizencore.objects.core.ScriptTag;
+import com.denizenscript.denizencore.scripts.ScriptRegistry;
 import com.denizenscript.denizencore.tags.TagManager;
 
 public class ScriptTagBase {
@@ -18,10 +19,15 @@ public class ScriptTagBase {
         TagManager.registerTagHandler(ScriptTag.class, "script", (attribute) -> {
             ScriptTag script = null;
             if (attribute.hasParam()) {
-                script = attribute.paramAsType(ScriptTag.class);
+                Object token = ScriptRegistry.scriptContainers;
+                script = (ScriptTag) attribute.typedParamFor(token);
                 if (script == null) {
-                    attribute.echoError("Script '" + attribute.getParam() + "' does not exist.");
-                    return null;
+                    script = attribute.paramAsType(ScriptTag.class);
+                    if (script == null) {
+                        attribute.echoError("Script '" + attribute.getParam() + "' does not exist.");
+                        return null;
+                    }
+                    attribute.rememberTypedParam(token, script);
                 }
             }
             else if (attribute.context.script != null) {

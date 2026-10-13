@@ -163,6 +163,15 @@ public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
     }
 
     @Override
+    public MapTag getRootMap(StringHolder key) {
+        SaveOptimizedFlag flag = map.get(key);
+        if (flag == null) {
+            return null;
+        }
+        return flag.getMap();
+    }
+
+    @Override
     public void setRootMap(String key, MapTag value) {
         modified = true;
         if (value == null) {

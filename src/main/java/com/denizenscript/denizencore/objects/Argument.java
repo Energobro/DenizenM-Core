@@ -1,6 +1,8 @@
 package com.denizenscript.denizencore.objects;
 
 import com.denizenscript.denizencore.objects.core.ElementTag;
+import com.denizenscript.denizencore.objects.core.ScriptTag;
+import com.denizenscript.denizencore.scripts.ScriptRegistry;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.tags.TagContext;
@@ -293,6 +295,32 @@ public class Argument implements Cloneable {
         }
         requireValue();
         return new ElementTag(prefix, value);
+    }
+
+    private record ScriptTagMemo(Object token, String text, ScriptTag script) {}
+
+    private ScriptTagMemo scriptTagMemo;
+
+    /**
+     * This argument read as a script, or null when it is not one.
+     * <p>
+     * Remembered per line: resolving a script name costs two registry lookups and three lowercase passes, and a line's
+     * script name is the same text on every run. The remembered answer is dropped when {@link ScriptRegistry#scriptContainers}
+     * is replaced, which is what a script reload does.
+     */
+    public ScriptTag scriptTagValue() {
+        String text = getRawValue();
+        if (text == null) {
+            return null;
+        }
+        Object token = ScriptRegistry.scriptContainers;
+        ScriptTagMemo memo = scriptTagMemo;
+        if (memo != null && memo.token() == token && text.equals(memo.text())) {
+            return memo.script();
+        }
+        ScriptTag resolved = object != null && object.canBeType(ScriptTag.class) ? asType(ScriptTag.class) : null;
+        scriptTagMemo = new ScriptTagMemo(token, text, resolved);
+        return resolved;
     }
 
     public <T extends ObjectTag> T asType(Class<T> clazz) {

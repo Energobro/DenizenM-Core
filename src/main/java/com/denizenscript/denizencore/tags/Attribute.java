@@ -29,7 +29,19 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         }
     }
 
+    public record TypedParam(Object token, ObjectTag value) {}
+
+    public static final int PLAIN_INDEX_UNRESOLVED = Integer.MIN_VALUE, PLAIN_INDEX_DYNAMIC = Integer.MIN_VALUE + 1, PLAIN_INDEX_UNUSABLE = Integer.MIN_VALUE + 2, PLAIN_INDEX_FIRST = Integer.MIN_VALUE + 3, PLAIN_INDEX_LAST = Integer.MIN_VALUE + 4;
+
     public static class AttributeComponent {
+
+        public volatile TypedParam typedParam;
+
+        public volatile int plainIndexParam = PLAIN_INDEX_UNRESOLVED;
+
+        public volatile StringHolder plainKeyParam;
+
+        public volatile StringHolder[] dottedPath;
 
         public final String rawKey;
 
@@ -152,13 +164,11 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     String origin;
 
-    public ArrayList<String> seemingSuccesses;
+    /** Only ever the most recent one: the error path reads just the last, so a list would allocate on a hot failure path for nothing. */
+    public String lastSeemingSuccess;
 
     public void addSeemingSuccess(String text) {
-        if (seemingSuccesses == null) {
-            seemingSuccesses = new ArrayList<>(2);
-        }
-        seemingSuccesses.add(text);
+        lastSeemingSuccess = text;
     }
 
     /* Referenced by TagCodeGenerator */
@@ -177,9 +187,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         if (CoreConfiguration.debugVerbose) {
             Debug.echoError("(Verbose) Attribute - error track reset");
         }
-        if (seemingSuccesses != null && !seemingSuccesses.isEmpty()) {
-            seemingSuccesses.clear();
-        }
+        lastSeemingSuccess = null;
         hasContextFailed = false;
     }
 
@@ -197,6 +205,17 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     }
 
     private Attribute() {
+    }
+
+    public final void resetForNextUse() {
+        fulfilled = 0;
+        hadManualFulfill = false;
+        lastValid = null;
+        hasContextFailed = false;
+        lastSeemingSuccess = null;
+        if (filled != null) {
+            Arrays.fill(filled, 0);
+        }
     }
 
     public static Attribute forRepeatedUse(Attribute ref, ScriptEntry scriptEntry, TagContext preparedContext, boolean hadAlternative) {
@@ -299,7 +318,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
     }
 
     public final boolean startsWith(String string, int attribute) {
-        return CoreUtilities.toLowerCase(getAttributeWithoutParam(attribute)).equals(string);
+        return getAttributeWithoutParam(attribute).equals(string);
     }
 
     public final boolean isComplete() {
@@ -340,6 +359,112 @@ public class Attribute implements TagContext.ShowErrorsMethod {
         }
     }
 
+    public final ObjectTag typedParamFor(Object token) {
+        if (fulfilled >= attributes.length) {
+            return null;
+        }
+        TypedParam memo = attributes[fulfilled].typedParam;
+        return memo != null && memo.token() == token ? memo.value() : null;
+    }
+
+    public final void rememberTypedParam(Object token, ObjectTag value) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        if (component.paramParsed != null && component.paramParsed.rawObject != null) {
+            component.typedParam = new TypedParam(token, value);
+        }
+    }
+
+    public static final StringHolder DYNAMIC_KEY_PARAM = StringHolder.ofLowered(" dynamic");
+
+    public final StringHolder[] cachedDottedPath() {
+        if (fulfilled >= attributes.length) {
+            return null;
+        }
+        return attributes[fulfilled].dottedPath;
+    }
+
+    public final void rememberDottedPath(String raw) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        if (component.paramParsed == null || component.paramParsed.rawObject == null) {
+            return;
+        }
+        component.dottedPath = dottedPathOf(CoreUtilities.toLowerCase(raw));
+    }
+
+    public static StringHolder[] dottedPathOf(String lowered) {
+        List<String> segments = CoreUtilities.split(lowered, '.');
+        StringHolder[] path = new StringHolder[segments.size()];
+        for (int i = 0; i < path.length; i++) {
+            path[i] = StringHolder.ofLowered(segments.get(i));
+        }
+        return path;
+    }
+
+    public final StringHolder cachedKeyParam() {
+        if (fulfilled >= attributes.length) {
+            return null;
+        }
+        return attributes[fulfilled].plainKeyParam;
+    }
+
+    public final void rememberKeyParam(StringHolder key) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        component.plainKeyParam = component.paramParsed != null && component.paramParsed.rawObject != null ? key : DYNAMIC_KEY_PARAM;
+    }
+
+    public final int cachedPlainIndexParam() {
+        if (fulfilled >= attributes.length) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        return attributes[fulfilled].plainIndexParam;
+    }
+
+    public final void rememberPlainIndexParam(int token) {
+        if (fulfilled >= attributes.length) {
+            return;
+        }
+        AttributeComponent component = attributes[fulfilled];
+        component.plainIndexParam = component.paramParsed != null && component.paramParsed.rawObject != null ? token : PLAIN_INDEX_DYNAMIC;
+    }
+
+    public static int plainIndexToken(String input) {
+        int length = input.length();
+        if (length == 0) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        if (length == 4 && CoreUtilities.equalsIgnoreCase(input, "last")) {
+            return PLAIN_INDEX_LAST;
+        }
+        if (length == 5 && CoreUtilities.equalsIgnoreCase(input, "first")) {
+            return PLAIN_INDEX_FIRST;
+        }
+        int at = input.charAt(0) == '-' ? 1 : 0;
+        if (at == length || length - at > 9) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        if (input.charAt(at) == '0' && (at == 1 || length > 1)) {
+            return PLAIN_INDEX_UNUSABLE;
+        }
+        int value = 0;
+        while (at < length) {
+            char c = input.charAt(at++);
+            if (c < '0' || c > '9') {
+                return PLAIN_INDEX_UNUSABLE;
+            }
+            value = value * 10 + (c - '0');
+        }
+        return input.charAt(0) == '-' ? -value : value;
+    }
+
     public final boolean hasParam() {
         if (fulfilled >= attributes.length) {
             return false;
@@ -372,7 +497,14 @@ public class Attribute implements TagContext.ShowErrorsMethod {
 
     public static class OverridingDefinitionProvider implements DefinitionProvider {
         public DefinitionProvider originalProvider;
-        public MapTag altDefs = new MapTag();
+        public MapTag altDefs;
+
+        public MapTag altDefs() {
+            if (altDefs == null) {
+                altDefs = new MapTag();
+            }
+            return altDefs;
+        }
 
         public StringHolder slotKeyA, slotKeyB;
 
@@ -392,7 +524,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
                 slotValueB = value;
             }
             else {
-                altDefs.map.put(key, value);
+                altDefs().map.put(key, value);
             }
         }
 
@@ -407,7 +539,7 @@ public class Attribute implements TagContext.ShowErrorsMethod {
                 value = slotValueB;
             }
             if (value == null) {
-                return altDefs.map.isEmpty() ? null : altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
+                return altDefs == null || altDefs.map.isEmpty() ? null : altDefs.getDeepObject(CoreUtilities.toLowerCase(definition));
             }
             if (dot == -1) {
                 return value;
@@ -442,6 +574,30 @@ public class Attribute implements TagContext.ShowErrorsMethod {
             ObjectTag result = findOverride(definition);
             if (result != null) {
                 return result;
+            }
+            return originalProvider.getDefinitionObject(definition);
+        }
+
+        @Override
+        public ObjectTag getDefinitionObject(StringHolder definition) {
+            if (definition.low.indexOf('.') != -1) {
+                return getDefinitionObject(definition.str);
+            }
+            ObjectTag value = null;
+            if (slotKeyA != null && slotKeyA.low.equals(definition.low)) {
+                value = slotValueA;
+            }
+            else if (slotKeyB != null && slotKeyB.low.equals(definition.low)) {
+                value = slotValueB;
+            }
+            if (value != null) {
+                return value;
+            }
+            if (altDefs != null) {
+                ObjectTag found = altDefs.getObject(definition);
+                if (found != null) {
+                    return found;
+                }
             }
             return originalProvider.getDefinitionObject(definition);
         }

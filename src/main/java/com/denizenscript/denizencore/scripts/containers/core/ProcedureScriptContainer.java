@@ -1,6 +1,11 @@
 package com.denizenscript.denizencore.scripts.containers.core;
 
 import com.denizenscript.denizencore.DenizenCore;
+import com.denizenscript.denizencore.scripts.ScriptEntry;
+import com.denizenscript.denizencore.scripts.ScriptEntrySet;
+import com.denizenscript.denizencore.scripts.commands.queue.DetermineCommand;
+import com.denizenscript.denizencore.tags.ParseableTag;
+import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.scripts.containers.ScriptContainer;
 import com.denizenscript.denizencore.utilities.YamlConfiguration;
 
@@ -54,6 +59,70 @@ public class ProcedureScriptContainer extends ScriptContainer {
 
     public ProcedureScriptContainer(YamlConfiguration configurationSection, String scriptContainerName) {
         super(configurationSection, scriptContainerName);
+    }
+
+    private static final String[] NEEDS_A_QUEUE = {"<queue", "<entry", "<util.queues"};
+
+    private volatile byte directDetermineState;
+
+    private ParseableTag directDetermineValue;
+
+    /**
+     * The value expression of a procedure whose whole body is one plain 'determine', or null when the procedure is anything else.
+     * <p>
+     * Such a procedure produces its answer by parsing that one expression, so the 'proc' tag can hand back the parsed value directly
+     * instead of building a queue to run a single line. Eligibility is deliberately narrow: exactly one entry, that entry is
+     * 'determine' with one unprefixed argument and no 'passively', no '~', no 'if:'/'save:', the script's debug is off, and the
+     * expression names nothing that only exists while a queue is running.
+     */
+    public ParseableTag directDetermineValue() {
+        byte state = directDetermineState;
+        if (state != 0) {
+            return state == 1 ? directDetermineValue : null;
+        }
+        ParseableTag found = findDirectDetermineValue();
+        directDetermineValue = found;
+        directDetermineState = found == null ? (byte) 2 : (byte) 1;
+        return found;
+    }
+
+    private ParseableTag findDirectDetermineValue() {
+        if (shouldDebug()) {
+            return null;
+        }
+        ScriptEntrySet set = getSetFor("script");
+        if (set == null || set.entries.size() != 1) {
+            return null;
+        }
+        ScriptEntry entry = set.entries.get(0);
+        ScriptEntry.ScriptEntryInternal internal = entry.internal;
+        if (!(internal.actualCommand instanceof DetermineCommand) || internal.waitfor || internal.bracedSet != null) {
+            return null;
+        }
+        if (internal.preprocArgs != null && !internal.preprocArgs.isEmpty()) {
+            return null;
+        }
+        if (internal.booleans != null) {
+            for (ScriptEntry.BooleanArg bool : internal.booleans) {
+                if (bool != null) {
+                    return null;
+                }
+            }
+        }
+        if (internal.arguments_to_use == null || internal.arguments_to_use.length != 1) {
+            return null;
+        }
+        ScriptEntry.InternalArgument arg = internal.arguments_to_use[0];
+        if (arg.prefix != null || arg.value == null || arg.fullOriginalRawValue == null) {
+            return null;
+        }
+        String lowered = CoreUtilities.toLowerCase(arg.fullOriginalRawValue);
+        for (String banned : NEEDS_A_QUEUE) {
+            if (lowered.contains(banned)) {
+                return null;
+            }
+        }
+        return arg.value;
     }
 
     @Override

@@ -10,6 +10,7 @@ import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ScriptTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
+import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 
 import java.util.List;
 
@@ -105,12 +106,13 @@ public class InjectCommand extends AbstractCommand {
         if (scriptEntry.dbCallShouldDebug()) {
             Debug.report(scriptEntry, getName(), script, instant, path);
         }
+        ScriptQueue residingQueue = scriptEntry.getResidingQueue();
         List<ScriptEntry> entries;
         if (path != null) {
-            entries = script.getContainer().getEntries(scriptEntry.entryData.clone(), path.asString());
+            entries = script.getContainer().getEntries(scriptEntry.entryData, path.asString(), residingQueue);
         }
         else {
-            entries = script.getContainer().getBaseEntries(scriptEntry.entryData.clone());
+            entries = script.getContainer().getBaseEntries(scriptEntry.entryData, residingQueue);
         }
         if (entries == null) {
             Debug.echoError(scriptEntry, "Script inject failed (invalid script path '" + path + "')!");

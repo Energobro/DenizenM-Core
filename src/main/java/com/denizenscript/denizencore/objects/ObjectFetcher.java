@@ -320,24 +320,38 @@ public class ObjectFetcher {
         if (!isObjectWithProperties(input)) {
             return null;
         }
-        ArrayList<String> output = new ArrayList<>(input.length() / 7);
+        int parts = 2;
+        for (int at = input.indexOf(';'); at != -1; at = input.indexOf(';', at + 1)) {
+            parts++;
+        }
+        ArrayList<String> output = new ArrayList<>(parts);
         int start = 0;
         boolean needObject = true;
         int brackets = 0;
-        for (int i = 0; i < input.length(); i++) {
-            if (input.charAt(i) == '[' && needObject) {
-                needObject = false;
+        int len = input.length();
+        for (int i = 0; i < len; i++) {
+            char c = input.charAt(i);
+            if (c == '[') {
+                if (needObject) {
+                    needObject = false;
+                    output.add(input.substring(start, i));
+                    start = i + 1;
+                }
+                else {
+                    brackets++;
+                }
+            }
+            else if (c == ']') {
+                if (brackets > 0) {
+                    brackets--;
+                }
+                else {
+                    output.add(input.substring(start, i));
+                    start = i + 1;
+                }
+            }
+            else if (c == ';' && brackets == 0) {
                 output.add(input.substring(start, i));
-                start = i + 1;
-            }
-            else if (input.charAt(i) == '[') {
-                brackets++;
-            }
-            else if (input.charAt(i) == ']' && brackets > 0) {
-                brackets--;
-            }
-            else if ((input.charAt(i) == ';' || input.charAt(i) == ']') && brackets == 0) {
-                output.add((input.substring(start, i)));
                 start = i + 1;
             }
         }

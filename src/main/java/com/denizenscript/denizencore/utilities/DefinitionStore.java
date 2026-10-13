@@ -107,7 +107,18 @@ public class DefinitionStore {
         else {
             disarm(map.map.put(key, value));
         }
-        invalidate(key.low);
+        if (table == null) {
+            return;
+        }
+        int slot = table.lookup(key.low);
+        if (slot == DefinitionSlots.NO_SLOT) {
+            return;
+        }
+        if (slot >= filled.length || slot >= slots.length) {
+            grow();
+        }
+        slots[slot] = value;
+        filled[slot] = true;
     }
 
     public void putDeepObject(String key, ObjectTag value) {

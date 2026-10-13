@@ -46,6 +46,76 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
         return returnValue;
     }
 
+    @Override
+    public ObjectTag getFlagValueByPath(StringHolder[] path, String raw) {
+        return path.length == 1 ? getFlagValueOfType(path[0], valueString) : getDeepFlagValueOfType(path, valueString);
+    }
+
+    @Override
+    public boolean hasFlagByPath(StringHolder[] path, String raw) {
+        return getFlagValueByPath(path, raw) != null;
+    }
+
+    public ObjectTag getFlagValueOfType(StringHolder key, StringHolder type) {
+        MapTag map = getRootMap(key);
+        if (map == null) {
+            return null;
+        }
+        if (isExpired(map.getObject(expirationString))) {
+            return null;
+        }
+        ObjectTag returnValue = map.getObject(type);
+        if (returnValue instanceof MapTag) {
+            return deflaggedSubMap((MapTag) returnValue);
+        }
+        return returnValue;
+    }
+
+    public ObjectTag getDeepFlagValueOfType(StringHolder[] path, StringHolder type) {
+        MapTag map = getRootMap(path[0]);
+        if (map == null) {
+            return null;
+        }
+        if (isExpired(map.getObject(expirationString))) {
+            return null;
+        }
+        ObjectTag rootValue = map.getObject(valueString);
+        if (!(rootValue instanceof MapTag)) {
+            return null;
+        }
+        map = (MapTag) rootValue;
+        StringHolder endKey = path[path.length - 1];
+        for (int i = 1; i < path.length - 1; i++) {
+            MapTag subMap = (MapTag) map.getObject(path[i]);
+            if (subMap == null) {
+                return null;
+            }
+            if (isExpired(subMap.getObject(expirationString))) {
+                return null;
+            }
+            ObjectTag subValue = subMap.getObject(valueString);
+            if (!(subValue instanceof MapTag)) {
+                return null;
+            }
+            map = (MapTag) subValue;
+        }
+        MapTag obj = (MapTag) map.getObject(endKey);
+        if (obj == null) {
+            return null;
+        }
+        ObjectTag value = obj.getObject(type);
+        if (value == null) {
+            return null;
+        }
+        if (isExpired(obj.getObject(expirationString))) {
+            return null;
+        }
+        if (value instanceof MapTag) {
+            return deflaggedSubMap((MapTag) value);
+        }
+        return value;
+    }
+
     public ObjectTag getDeepFlagValueOfType(List<String> splitKey, StringHolder type) {
         MapTag map = getRootMap(splitKey.get(0));
         if (map == null) {

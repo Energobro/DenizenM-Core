@@ -493,8 +493,8 @@ public class TagManager {
                 if (attribute.lastValid != null) {
                     Debug.echoError(context, "The returned value from initial tag fragment '<LG>" + attribute.filledString() + "<W>' was: '<LG>" + attribute.lastValid.debuggable() + "<W>'.");
                 }
-                if (attribute.seemingSuccesses != null && !attribute.seemingSuccesses.isEmpty()) {
-                    String almost = attribute.seemingSuccesses.get(attribute.seemingSuccesses.size() - 1);
+                if (attribute.lastSeemingSuccess != null) {
+                    String almost = attribute.lastSeemingSuccess;
                     if (attribute.hasContextFailed) {
                         Debug.echoError(context, "Almost matched but failed (missing [context] parameter?): " + almost);
                     }

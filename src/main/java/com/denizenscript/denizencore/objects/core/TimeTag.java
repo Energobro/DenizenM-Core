@@ -59,37 +59,55 @@ public class TimeTag implements ObjectTag, Adjustable, FlaggableObject {
         if (string.startsWith("time@") && string.length() > "time@".length()) {
             string = string.substring("time@".length());
         }
-        List<String> coreParts = CoreUtilities.split(string, '_');
-        if (coreParts.size() > 3) {
+        int start = 0, end = string.length();
+        int underscore1 = string.indexOf('_', start);
+        int underscore2 = underscore1 < 0 ? -1 : string.indexOf('_', underscore1 + 1);
+        if (underscore2 >= 0 && string.indexOf('_', underscore2 + 1) >= 0) {
             return null;
         }
-        List<String> dateParts = CoreUtilities.split(coreParts.get(0), '/');
-        if (dateParts.size() != 3) {
+        int dateEnd = underscore1 < 0 ? end : underscore1;
+        int slash1 = string.indexOf('/', start);
+        int slash2 = slash1 < 0 || slash1 >= dateEnd ? -1 : string.indexOf('/', slash1 + 1);
+        if (slash1 < 0 || slash1 >= dateEnd || slash2 < 0 || slash2 >= dateEnd) {
             return null;
         }
-        List<String> timeParts = null;
-        if (coreParts.size() > 1) {
-            timeParts = CoreUtilities.split(coreParts.get(1), ':');
-            if (timeParts.size() != 3 && timeParts.size() != 4) {
+        int slash3 = string.indexOf('/', slash2 + 1);
+        if (slash3 >= 0 && slash3 < dateEnd) {
+            return null;
+        }
+        int timeStart = -1, timeEnd = -1, colon1 = -1, colon2 = -1, colon3 = -1;
+        if (underscore1 >= 0) {
+            timeStart = underscore1 + 1;
+            timeEnd = underscore2 < 0 ? end : underscore2;
+            colon1 = string.indexOf(':', timeStart);
+            colon2 = colon1 < 0 || colon1 >= timeEnd ? -1 : string.indexOf(':', colon1 + 1);
+            colon3 = colon2 < 0 || colon2 >= timeEnd ? -1 : string.indexOf(':', colon2 + 1);
+            if (colon1 < 0 || colon1 >= timeEnd || colon2 < 0 || colon2 >= timeEnd) {
+                return null;
+            }
+            if (colon3 >= timeEnd) {
+                colon3 = -1;
+            }
+            if (colon3 >= 0 && colon4Within(string, colon3, timeEnd)) {
                 return null;
             }
         }
         try {
-            int year = Integer.parseInt(dateParts.get(0));
-            int month = Integer.parseInt(dateParts.get(1));
-            int day = Integer.parseInt(dateParts.get(2));
+            int year = Integer.parseInt(string, start, slash1, 10);
+            int month = Integer.parseInt(string, slash1 + 1, slash2, 10);
+            int day = Integer.parseInt(string, slash2 + 1, dateEnd, 10);
             int hour = 0, minute = 0, second = 0, millisecond = 0;
-            if (timeParts != null) {
-                hour = Integer.parseInt(timeParts.get(0));
-                minute = Integer.parseInt(timeParts.get(1));
-                second = Integer.parseInt(timeParts.get(2));
-                if (timeParts.size() == 4) {
-                    millisecond = Integer.parseInt(timeParts.get(3));
+            if (underscore1 >= 0) {
+                hour = Integer.parseInt(string, timeStart, colon1, 10);
+                minute = Integer.parseInt(string, colon1 + 1, colon2, 10);
+                second = Integer.parseInt(string, colon2 + 1, colon3 < 0 ? timeEnd : colon3, 10);
+                if (colon3 >= 0) {
+                    millisecond = Integer.parseInt(string, colon3 + 1, timeEnd, 10);
                 }
             }
             ZoneOffset offset = ZoneOffset.UTC;
-            if (coreParts.size() > 2) {
-                offset = ZoneOffset.of(coreParts.get(2));
+            if (underscore2 >= 0) {
+                offset = ZoneOffset.of(string.substring(underscore2 + 1, end));
             }
             return new TimeTag(year, month, day, hour, minute, second, millisecond, offset);
         }
@@ -99,6 +117,11 @@ public class TimeTag implements ObjectTag, Adjustable, FlaggableObject {
             }
             return null;
         }
+    }
+
+    private static boolean colon4Within(String string, int colon3, int timeEnd) {
+        int colon4 = string.indexOf(':', colon3 + 1);
+        return colon4 >= 0 && colon4 < timeEnd;
     }
 
     public static boolean matches(String string) {

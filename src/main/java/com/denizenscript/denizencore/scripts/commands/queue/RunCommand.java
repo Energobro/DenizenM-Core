@@ -166,9 +166,9 @@ public class RunCommand extends AbstractCommand implements Holdable {
                 scriptEntry.addObject("speed", arg.asType(DurationTag.class));
             }
             else if (!scriptEntry.hasObject("script")
-                    && arg.matchesArgumentType(ScriptTag.class)
+                    && arg.scriptTagValue() != null
                     && arg.limitToOnlyPrefix("script")) {
-                scriptEntry.addObject("script", arg.asType(ScriptTag.class));
+                scriptEntry.addObject("script", arg.scriptTagValue());
             }
             else if (!scriptEntry.hasObject("script") && !scriptEntry.hasObject("path")
                     && !arg.hasPrefix() && arg.asElement().asString().contains(".")) {
@@ -243,7 +243,9 @@ public class RunCommand extends AbstractCommand implements Holdable {
                 }
             }
             // Save the queue for script referencing
-            scriptEntry.saveObject("created_queue", new QueueTag(queue));
+            if (scriptEntry.saveName != null) {
+                scriptEntry.saveObject("created_queue", new QueueTag(queue));
+            }
             // Preserve procedural status
             queue.procedural = scriptEntry.getResidingQueue().procedural;
         };

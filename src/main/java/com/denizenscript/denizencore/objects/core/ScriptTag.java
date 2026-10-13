@@ -120,7 +120,7 @@ public class ScriptTag implements ObjectTag, Adjustable, FlaggableObject {
     }
 
     public static boolean matches(String string) {
-        if (CoreUtilities.toLowerCase(string).startsWith("s@")) {
+        if (string.regionMatches(true, 0, "s@", 0, 2)) {
             return true;
         }
         return ScriptRegistry.getScriptContainer(string) != null;
@@ -355,11 +355,11 @@ public class ScriptTag implements ObjectTag, Adjustable, FlaggableObject {
                 Debug.echoError("Script '" + container.getName() + "' missing root section?!");
                 return null;
             }
-            Object obj = section.get(key.asString());
-            if (obj == null) {
+            ObjectTag form = container.dataKeyTagForm(key.asString(), section, attribute.context);
+            if (form == null) {
                 return null;
             }
-            return CoreUtilities.objectToTagForm(obj, attribute.context, true);
+            return form.duplicate();
         });
         tagProcessor.registerFutureTagDeprecation("data_key", "yaml_key");
 
