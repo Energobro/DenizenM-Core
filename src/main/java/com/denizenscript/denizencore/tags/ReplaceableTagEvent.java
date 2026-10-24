@@ -44,7 +44,7 @@ public class ReplaceableTagEvent {
 
         public TagManager.TagBaseData tagBase = null;
 
-        public TagRunnable.BaseInterface<? extends ObjectTag> compiledStart;
+        public volatile TagRunnable.BaseInterface<? extends ObjectTag> compiledStart;
 
         public boolean noGenerate = false;
 
@@ -58,6 +58,8 @@ public class ReplaceableTagEvent {
     }
 
     public ReferenceData mainRef = null;
+
+    TagRunnable.BaseInterface<? extends ObjectTag> compiledAtStart;
 
     /** Cache of pre-parsed tag reference data. Concurrent, as tags can be parsed from async queues. */
     public static Map<String, ReferenceData> refs = new ConcurrentHashMap<>();
@@ -76,7 +78,8 @@ public class ReplaceableTagEvent {
         this.unreplacedText = tag;
         if (ref != null) {
             mainRef = ref;
-            core_attributes = new Attribute(ref.attribs, context.entry, context, ref.skippable);
+            compiledAtStart = ref.compiledStart;
+            core_attributes = new Attribute(ref.attribs, context.entry, context, compiledAtStart == null ? 0 : ref.skippable);
             raw_tag = ref.rawTag;
         }
     }

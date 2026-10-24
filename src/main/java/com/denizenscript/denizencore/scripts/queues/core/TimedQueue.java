@@ -133,6 +133,27 @@ public class TimedQueue extends ScriptQueue {
         }
     }
 
+    private boolean resumeScheduled = false;
+
+    private boolean revolving = false;
+
+    @Override
+    public void wake() {
+        if (!DenizenCore.isMainThread() || revolving || resumeScheduled || !is_started || isStopped || !isInstantSpeed()) {
+            return;
+        }
+        resumeScheduled = true;
+        DenizenCore.mainThreadWaitingTasks.add(this::resumeAfterWake);
+    }
+
+    private void resumeAfterWake() {
+        resumeScheduled = false;
+        if (!is_started || isStopped || holdingOn != null || paused || isDelayed() || !isInstantSpeed()) {
+            return;
+        }
+        revolve();
+    }
+
     public void revolve() {
         if (!hasMoreWork() && holdingOn == null) {
             if (!waitWhenEmpty) {
@@ -144,10 +165,13 @@ public class TimedQueue extends ScriptQueue {
             return;
         }
         ScriptQueue prior = ScriptEngine.enterQueue(this);
+        boolean wasRevolving = revolving;
+        revolving = true;
         try {
             ScriptEngine.revolve(this);
         }
         finally {
+            revolving = wasRevolving;
             ScriptEngine.leaveQueue(prior);
         }
         if (!hasMoreWork() && holdingOn == null && !waitWhenEmpty) {

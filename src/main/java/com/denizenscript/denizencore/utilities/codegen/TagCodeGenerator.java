@@ -119,7 +119,11 @@ public class TagCodeGenerator {
         try {
             // ====== Gen class ======
             String tagFullName = CodeGenUtil.cleanName(data.rawTag.replace('.', '_'));
-            String className = CodeGenUtil.CORE_GEN_PACKAGE + "UserTags/UserTag" + (totalGenerated++) + "_" + tagFullName;
+            long classId;
+            synchronized (TagCodeGenerator.class) {
+                classId = totalGenerated++;
+            }
+            String className = CodeGenUtil.CORE_GEN_PACKAGE + "UserTags/UserTag" + classId + "_" + tagFullName;
             ClassWriter cw = new ClassWriter(ClassWriter.COMPUTE_MAXS | ClassWriter.COMPUTE_FRAMES);
             cw.visit(Opcodes.V1_8, Opcodes.ACC_PUBLIC, className, null, "java/lang/Object", new String[] {TagNamer.BASE_INTERFACE_PATH});
             cw.visitSource("GENERATED_TAG", null);

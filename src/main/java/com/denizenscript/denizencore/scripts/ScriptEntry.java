@@ -1,5 +1,6 @@
 package com.denizenscript.denizencore.scripts;
 
+import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.exceptions.InvalidArgumentsRuntimeException;
 import com.denizenscript.denizencore.objects.*;
@@ -15,19 +16,20 @@ import com.denizenscript.denizencore.scripts.commands.generator.CommandExecution
 import com.denizenscript.denizencore.scripts.containers.ScriptContainer;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.tags.ParseableTag;
+import com.denizenscript.denizencore.tags.TagContext;
+import com.denizenscript.denizencore.tags.TagManager;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.CoreUtilities;
 import com.denizenscript.denizencore.utilities.DefinitionSlots;
 import com.denizenscript.denizencore.utilities.Deprecations;
 import com.denizenscript.denizencore.utilities.EnumHelper;
+import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 import com.denizenscript.denizencore.utilities.debugging.Debuggable;
-import com.denizenscript.denizencore.utilities.debugging.Debug;
-import com.denizenscript.denizencore.DenizenCore;
-import com.denizenscript.denizencore.tags.TagContext;
-import com.denizenscript.denizencore.tags.TagManager;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.*;
+import java.util.concurrent.atomic.AtomicLongFieldUpdater;
 
 /**
  * ScriptEntry contain information about a single entry from a dScript. It is used
@@ -102,11 +104,41 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         public ScriptEntry asyncOwner = null;
 
         /**
-         * For an <@link command async> block: the longest its contents have ever taken to run, in nanoseconds. -1 means it has never run yet.
+         * For an <@link command async> block: the longest its contents have ever taken to run, in nanoseconds. -1 until it has run past its first few runs.
          * Shared between clones on purpose - this measures one line of one script, however many times it runs.
          * See {@link com.denizenscript.denizencore.utilities.CoreConfiguration#asyncBlockInlineThresholdNanos}.
          */
         public volatile long asyncBlockMaxNanos = -1;
+
+        public volatile long waitedMaxNanos = -1;
+
+        public volatile int asyncBlockRuns = 0, waitedRuns = 0;
+
+        public static final int COST_WARMUP_RUNS = 2;
+
+        private static final AtomicLongFieldUpdater<ScriptEntryInternal> ASYNC_BLOCK_MAX = AtomicLongFieldUpdater.newUpdater(ScriptEntryInternal.class, "asyncBlockMaxNanos");
+
+        private static final AtomicLongFieldUpdater<ScriptEntryInternal> WAITED_MAX = AtomicLongFieldUpdater.newUpdater(ScriptEntryInternal.class, "waitedMaxNanos");
+
+        public void recordAsyncBlockCost(long elapsedNanos) {
+            int runs = asyncBlockRuns;
+            if (runs < COST_WARMUP_RUNS) {
+                asyncBlockRuns = runs + 1;
+                return;
+            }
+            ASYNC_BLOCK_MAX.accumulateAndGet(this, elapsedNanos, Math::max);
+        }
+
+        public void recordWaitedCost(long elapsedNanos) {
+            int runs = waitedRuns;
+            if (runs < COST_WARMUP_RUNS) {
+                waitedRuns = runs + 1;
+                return;
+            }
+            WAITED_MAX.accumulateAndGet(this, elapsedNanos, Math::max);
+        }
+
+        public StringHolder loopValueHolder, loopKeyHolder;
 
         public volatile ScriptEntry asyncMarkerPrototype;
 
@@ -153,6 +185,9 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             result.shouldDebugBool = shouldDebugBool;
             result.defObjects = defObjects;
             result.asyncBlockMaxNanos = asyncBlockMaxNanos;
+            result.waitedMaxNanos = waitedMaxNanos;
+            result.asyncBlockRuns = asyncBlockRuns;
+            result.waitedRuns = waitedRuns;
             if (preprocArgs != null) {
                 result.preprocArgs = new ArrayList<>(preprocArgs.size());
                 for (Argument arg : preprocArgs) {

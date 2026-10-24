@@ -148,7 +148,12 @@ public class RepeatCommand extends BracedCommand {
             datum.index = from;
             datum.target = datum.index + quantity - 1;
             datum.valueName = asName;
-            datum.valueHolder = new StringHolder(asName);
+            StringHolder valueHolder = scriptEntry.internal.loopValueHolder;
+            if (valueHolder == null || !valueHolder.str.equals(asName)) {
+                valueHolder = new StringHolder(asName);
+                scriptEntry.internal.loopValueHolder = valueHolder;
+            }
+            datum.valueHolder = valueHolder;
             scriptEntry.setData(datum);
             List<ScriptEntry> bracedCommandsList = scriptEntry.inlinedBody;
             if (bracedCommandsList == null) {
@@ -165,7 +170,7 @@ public class RepeatCommand extends BracedCommand {
             else {
                 ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
-            datum.originalValue = queue.getDefinitionObject(datum.valueName);
+            datum.originalValue = queue.getDefinitionObject(datum.valueHolder);
             datum.slotTable = scriptEntry.internal.slotTable;
             datum.valueSlot = ScriptQueue.slotFor(scriptEntry, datum.valueHolder);
             scriptEntry.setInstant(true);

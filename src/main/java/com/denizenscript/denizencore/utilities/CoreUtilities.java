@@ -99,31 +99,36 @@ public class CoreUtilities {
         }
         if (obj instanceof Iterable) {
             ListTag listResult = new ListTag();
+            boolean containsItself = false;
             for (Object subObj : (Iterable) obj) {
+                if (subObj == obj) {
+                    containsItself = true;
+                    break;
+                }
                 listResult.addObject(objectToTagForm(subObj, context, scriptStrip, doParse, canPick));
             }
-            return listResult;
+            if (!containsItself) {
+                return listResult;
+            }
+        }
+        for (Function<Object, ObjectTag> func : objectConversions) {
+            ObjectTag result = func.apply(obj);
+            if (result != null) {
+                return result.duplicate();
+            }
+        }
+        String result = obj.toString();
+        if (scriptStrip) {
+            result = ScriptBuilder.stripLinePrefix(result);
+        }
+        if (doParse) {
+            return TagManager.tagObject(result, context);
+        }
+        if (canPick) {
+            return ObjectFetcher.pickObjectFor(result, context);
         }
         else {
-            for (Function<Object, ObjectTag> func : objectConversions) {
-                ObjectTag result = func.apply(obj);
-                if (result != null) {
-                    return result.duplicate();
-                }
-            }
-            String result = obj.toString();
-            if (scriptStrip) {
-                result = ScriptBuilder.stripLinePrefix(result);
-            }
-            if (doParse) {
-                return TagManager.tagObject(result, context);
-            }
-            if (canPick) {
-                return ObjectFetcher.pickObjectFor(result, context);
-            }
-            else {
-                return new ElementTag(result, true);
-            }
+            return new ElementTag(result, true);
         }
     }
 

@@ -369,6 +369,10 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
      * Runs a task on the thread that owns this queue (immediately if already on it, otherwise as soon as that thread is available).
      * Use this whenever an async operation needs to hand a result back to a queue.
      */
+    public void resumeOnQueueThread(Runnable run) {
+        DenizenCore.runOnMainThreadWaiting(run);
+    }
+
     public void runOnQueueThread(Runnable run) {
         DenizenCore.runOnMainThread(run);
     }

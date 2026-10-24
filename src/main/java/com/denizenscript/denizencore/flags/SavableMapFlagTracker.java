@@ -188,6 +188,22 @@ public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
     }
 
     @Override
+    public void setRootMap(StringHolder key, MapTag value) {
+        modified = true;
+        if (value == null) {
+            map.remove(key);
+            return;
+        }
+        SaveOptimizedFlag flag = new SaveOptimizedFlag();
+        flag.map = value;
+        flag.string = null;
+        if (value.containsKey(expirationString) || value.getObject(valueString) instanceof MapTag) {
+            flag.canExpire = true;
+        }
+        map.put(key, flag);
+    }
+
+    @Override
     public Collection<String> listAllFlags() {
         ArrayList<String> keys = new ArrayList<>(map.size());
         for (StringHolder string : map.keySet()) {

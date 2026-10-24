@@ -118,8 +118,21 @@ public class CommandExecutor {
         return executeInternal(scriptEntry);
     }
 
+    public static boolean isWaitedKnownCheap(ScriptEntry scriptEntry) {
+        long threshold = CoreConfiguration.asyncBlockInlineThresholdNanos;
+        if (threshold <= 0) {
+            return false;
+        }
+        long maxSeen = scriptEntry.sharedInternal().waitedMaxNanos;
+        return maxSeen >= 0 && maxSeen < threshold;
+    }
+
+    public static void recordWaitedCost(ScriptEntry scriptEntry, long elapsed) {
+        scriptEntry.sharedInternal().recordWaitedCost(elapsed);
+    }
+
     private static boolean executeWaited(ScriptEntry scriptEntry, AbstractCommand command, boolean onMainThread) {
-        if (onMainThread && CoreConfiguration.allowAsyncScripts) {
+        if (onMainThread && CoreConfiguration.allowAsyncScripts && !isWaitedKnownCheap(scriptEntry)) {
             ScriptQueue queue = scriptEntry.getResidingQueue();
             if (!(queue instanceof TimedQueue)) {
                 // Waiting for this command will force the queue to become a timed queue - do that now, before the worker thread starts.
@@ -127,25 +140,32 @@ public class CommandExecutor {
                 // at the same moment the worker is writing to them.
                 queue.forceToTimed(null);
             }
+            DenizenCore.noteWorkerDispatch(scriptEntry.sharedInternal().waitedMaxNanos);
             scriptEntry.makeAsyncSafe();
             DenizenCore.runAsync(() -> {
+                long startNanos = System.nanoTime();
                 try {
                     executeInternal(scriptEntry);
                 }
                 finally {
+                    recordWaitedCost(scriptEntry, System.nanoTime() - startNanos);
                     // Hand the "I'm done" back to the queue's own thread, so the queue never resumes in the middle of this.
                     // Read the queue now rather than at dispatch time, as holding can move an entry to a replacement queue.
-                    scriptEntry.getResidingQueue().runOnQueueThread(() -> scriptEntry.setFinished(true));
+                    scriptEntry.getResidingQueue().resumeOnQueueThread(() -> scriptEntry.setFinished(true));
                 }
             });
             return true;
         }
-        // Either already off-thread (an async queue running its own '~' command), or async is disabled by config.
+        // Either already off-thread (an async queue running its own '~' command), async is disabled by config, or the line is known to be cheap.
         // Either way, run it right here - the queue still has to be released, since these commands never call setFinished themselves.
+        long startNanos = System.nanoTime();
         try {
             return executeInternal(scriptEntry);
         }
         finally {
+            if (onMainThread) {
+                recordWaitedCost(scriptEntry, System.nanoTime() - startNanos);
+            }
             scriptEntry.setFinished(true);
         }
     }

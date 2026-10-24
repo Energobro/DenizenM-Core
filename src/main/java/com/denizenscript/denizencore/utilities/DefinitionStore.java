@@ -101,8 +101,7 @@ public class DefinitionStore {
 
     public void putObject(StringHolder key, ObjectTag value) {
         if (value == null) {
-            disarm(map.getObject(key));
-            map.putObject(key, value);
+            disarm(map.map.remove(key));
         }
         else {
             disarm(map.map.put(key, value));
@@ -152,8 +151,7 @@ public class DefinitionStore {
 
     public void putSlot(DefinitionSlots forTable, int slot, StringHolder key, ObjectTag value) {
         if (value == null) {
-            disarm(map.getObject(key));
-            map.putObject(key, value);
+            disarm(map.map.remove(key));
         }
         else {
             disarm(map.map.put(key, value));

@@ -44,6 +44,10 @@ public abstract class AbstractFlagTracker {
 
     public abstract void setRootMap(String key, MapTag map);
 
+    public void setRootMap(StringHolder key, MapTag map) {
+        setRootMap(key.str, map);
+    }
+
     public abstract ObjectTag getFlagValue(String key);
 
     public abstract TimeTag getFlagExpirationTime(String key);

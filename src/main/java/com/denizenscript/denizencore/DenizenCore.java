@@ -11,6 +11,7 @@ import com.denizenscript.denizencore.scripts.ScriptRegistry;
 import com.denizenscript.denizencore.scripts.commands.CommandRegistry;
 import com.denizenscript.denizencore.scripts.commands.queue.RunLaterCommand;
 import com.denizenscript.denizencore.scripts.containers.ScriptContainer;
+import com.denizenscript.denizencore.scripts.queues.core.AsyncQueue;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.tags.Attribute;
 import com.denizenscript.denizencore.tags.ReplaceableTagEvent;
@@ -23,8 +24,6 @@ import com.denizenscript.denizencore.utilities.debugging.*;
 import com.denizenscript.denizencore.utilities.scheduling.AsyncSchedulable;
 import com.denizenscript.denizencore.utilities.scheduling.OneTimeSchedulable;
 import com.denizenscript.denizencore.utilities.scheduling.Schedulable;
-
-import com.denizenscript.denizencore.scripts.queues.core.AsyncQueue;
 
 import java.io.File;
 import java.io.FileNotFoundException;
@@ -127,8 +126,8 @@ public class DenizenCore {
      * Tasks from {@link #runOnMainThreadAndWait(Runnable)}, where a thread is standing still until they are done.
      * <p>
      * Always processed in full, and ahead of {@link #mainThreadTasks}: there can never be more of these at once than there are
-     * live async threads, and leaving them behind a backlog of logging and deferred commands would mean async scripts waiting
-     * on work that nobody is waiting on.
+     * live async threads plus held queues, and leaving them behind a backlog of logging and deferred commands would mean async
+     * scripts waiting on work that nobody is waiting on.
      */
     public static final ConcurrentLinkedQueue<Runnable> mainThreadWaitingTasks = new ConcurrentLinkedQueue<>();
 
@@ -308,6 +307,15 @@ public class DenizenCore {
         }
     }
 
+    public static void runOnMainThreadWaiting(Runnable run) {
+        if (isMainThread()) {
+            run.run();
+        }
+        else {
+            mainThreadWaitingTasks.add(run);
+        }
+    }
+
     /**
      * Runs the task on the main thread and blocks the calling thread until it has completed.
      * Runs immediately (without blocking) if already on the main thread.
@@ -393,6 +401,34 @@ public class DenizenCore {
 
     public static volatile long lingerAdaptiveNanos = 0;
 
+    public static volatile long lingerTargetNanos = 0;
+
+    public static void noteWorkerDispatch(long expectedNanos) {
+        if (expectedNanos <= 0 || expectedNanos >= LINGER_HARD_CAP_NANOS || CoreConfiguration.mainThreadWaitLingerMicros <= 0) {
+            return;
+        }
+        long target = System.nanoTime() + expectedNanos + (expectedNanos >> 1);
+        long current = lingerTargetNanos;
+        if (current == 0 || target - current > 0) {
+            lingerTargetNanos = target;
+        }
+    }
+
+    public static volatile long lingerSpentNanos = 0;
+
+    public static volatile long lingerCalls = 0;
+
+    public static volatile long lingerEmptyCalls = 0;
+
+    public static volatile long lingerAnswers = 0;
+
+    public static volatile long tickCount = 0;
+
+    private static boolean isWorkerExpected() {
+        long target = lingerTargetNanos;
+        return target != 0 && target - System.nanoTime() > 0;
+    }
+
     public static long nextLingerNanos() {
         long base = CoreConfiguration.mainThreadWaitLingerMicros * 1000L;
         return Math.max(base, Math.min(lingerAdaptiveNanos, base * LINGER_ADAPTIVE_MAX_MULTIPLIER));
@@ -412,27 +448,33 @@ public class DenizenCore {
         }
         long linger = nextLingerNanos();
         long start = System.nanoTime();
+        int answered = 0;
         long hardEnd = start + LINGER_HARD_CAP_NANOS;
-        long deadline = Math.min(start + linger, hardEnd);
-        long lastAnswer = start;
+        long deadline = lingerDeadline(start, linger, hardEnd);
         int spins = 0;
         while (true) {
             Runnable task = mainThreadWaitingTasks.poll();
             if (task != null) {
                 runMainThreadTask(task);
+                answered++;
                 long after = System.nanoTime();
-                lastAnswer = after;
                 if (after >= hardEnd) {
-                    adaptLingerWindow(linger, base, true);
+                    recordLinger(start, after, answered);
+                    adaptLingerWindow(linger, base, answered > 1);
                     return; // Left on the cap right after answering, so nothing was spent in vain.
                 }
-                deadline = Math.min(after + linger, hardEnd);
+                deadline = lingerDeadline(after, linger, hardEnd);
                 spins = 0;
                 continue;
             }
             long now = System.nanoTime();
             if (now >= deadline) {
-                adaptLingerWindow(linger, base, lastAnswer != start);
+                long target = lingerTargetNanos;
+                if (target != 0 && target - now <= 0) {
+                    lingerTargetNanos = 0;
+                }
+                recordLinger(start, now, answered);
+                adaptLingerWindow(linger, base, answered > 1);
                 return;
             }
             if (++spins >= SPINS_PER_YIELD) {
@@ -443,6 +485,27 @@ public class DenizenCore {
                 Thread.onSpinWait();
             }
         }
+    }
+
+    private static void recordLinger(long start, long end, int answered) {
+        lingerSpentNanos += end - start;
+        lingerCalls++;
+        lingerAnswers += answered;
+        if (answered == 0) {
+            lingerEmptyCalls++;
+        }
+    }
+
+    private static long lingerDeadline(long from, long linger, long hardEnd) {
+        long deadline = Math.min(from + linger, hardEnd);
+        long target = lingerTargetNanos;
+        if (target != 0 && target - from > 0) {
+            long extended = Math.min(target, hardEnd);
+            if (extended - deadline > 0) {
+                return extended;
+            }
+        }
+        return deadline;
     }
 
     private static void adaptLingerWindow(long linger, long base, boolean productive) {
@@ -468,7 +531,7 @@ public class DenizenCore {
             runMainThreadTask(task);
             answeredAny = true;
         }
-        if (answeredAny) {
+        if (answeredAny || isWorkerExpected()) {
             lingerForFollowUpRequests();
         }
         if (budgetMillis <= 0) {
@@ -516,10 +579,12 @@ public class DenizenCore {
      * @param ms_elapsed how many MS have actually elapsed. (50 on a standard engine).
      */
     public static void tick(int ms_elapsed) {
+        tickCount++;
         DebugInternals.onTick();
         serverTimeMillis += ms_elapsed;
         currentTimeMillis = System.currentTimeMillis();
         currentTimeMonotonicMillis = CoreUtilities.monotonicMillis();
+        AsyncQueue.wakeDueQueues();
         runMainThreadTasks();
         TickScriptEvent.instance.ticks++;
         if (TickScriptEvent.instance.eventData.isEnabled) {

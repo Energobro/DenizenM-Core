@@ -854,6 +854,33 @@ public class UtilTagBase extends PseudoObjectTagBase<UtilTagBase> {
         });
 
         // <--[tag]
+        // @attribute <util.linger_stats>
+        // @returns MapTag
+        // @description
+        // Returns a map describing how much main thread time is going into waiting a moment for async scripts, with keys:
+        // 'window' (DurationTag) - how long the main thread is currently willing to wait after answering a request,
+        // 'time_spent' (DurationTag) - how long it has spent waiting in total,
+        // 'calls' (ElementTag(Number)) - how many times it has waited,
+        // 'empty_calls' (ElementTag(Number)) - how many of those waits answered nothing, which is the part spent for nothing,
+        // 'answered' (ElementTag(Number)) - how many requests were answered during a wait instead of a tick later, and
+        // 'ticks' (ElementTag(Number)) - ticks since startup, so the rest can be read as a per-tick cost.
+        //
+        // The totals only ever grow, so read it twice and subtract: 'time_spent' divided by 'ticks' over the same span is what
+        // this is costing the server per tick. TPS cannot see a few milliseconds a tick, which is exactly why this exists.
+        // Refer to <@link language Async Queues>.
+        // -->
+        tagProcessor.registerTag(MapTag.class, "linger_stats", (attribute, object) -> {
+            MapTag result = new MapTag();
+            result.putObject("window", new DurationTag(DenizenCore.nextLingerNanos() / 1000000.0 / 1000.0));
+            result.putObject("time_spent", new DurationTag(DenizenCore.lingerSpentNanos / 1000000.0 / 1000.0));
+            result.putObject("calls", new ElementTag(DenizenCore.lingerCalls));
+            result.putObject("empty_calls", new ElementTag(DenizenCore.lingerEmptyCalls));
+            result.putObject("answered", new ElementTag(DenizenCore.lingerAnswers));
+            result.putObject("ticks", new ElementTag(DenizenCore.tickCount));
+            return result;
+        });
+
+        // <--[tag]
         // @attribute <util.current_time_millis>
         // @returns ElementTag(Number)
         // @description

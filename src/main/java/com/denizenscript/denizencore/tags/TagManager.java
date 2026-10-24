@@ -291,8 +291,8 @@ public class TagManager {
         if (baseHandler != null) {
             Attribute attribute = event.getAttributes();
             try {
-                if (event.mainRef.compiledStart != null && event.alternateBase == null) {
-                    ObjectTag result = event.mainRef.compiledStart.run(attribute);
+                if (event.compiledAtStart != null && event.alternateBase == null) {
+                    ObjectTag result = event.compiledAtStart.run(attribute);
                     if (result != null) {
                         event.setReplacedObject(result.getObjectAttribute(attribute));
                         return;
@@ -375,7 +375,7 @@ public class TagManager {
     public static boolean fastDefinitionPathEnabled = true;
 
     public static void markPlainDefinitionRead(ReplaceableTagEvent.ReferenceData data) {
-        if (data.compiledStart != null || data.alternative != null || data.value != null || data.skippable != 0 || data.attribs == null) {
+        if (data.compiledStart != null || data.value != null || data.skippable != 0 || data.attribs == null) {
             return;
         }
         Attribute.AttributeComponent[] parts = data.attribs.attributes;
@@ -417,7 +417,7 @@ public class TagManager {
                     if (data.attribs.attributes.length == 1) {
                         return definition.refreshState();
                     }
-                    Attribute attribute = new Attribute(data.attribs, context.entry, context, data.skippable);
+                    Attribute attribute = new Attribute(data.attribs, context.entry, context, data.compiledStart == null ? 0 : data.skippable);
                     Debug.ThreadState debugState = Debug.currentState();
                     TagContext lastContext = debugState.context;
                     debugState.context = context;

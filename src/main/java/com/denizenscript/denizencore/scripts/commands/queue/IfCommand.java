@@ -15,6 +15,7 @@ import com.denizenscript.denizencore.tags.ParseableTag;
 import com.denizenscript.denizencore.tags.TagManager;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 
 public class IfCommand extends BracedCommand {
@@ -182,6 +183,9 @@ public class IfCommand extends BracedCommand {
         boolean has_brace = parsed.hasBrace;
         List<BracedData> braces = null;
         boolean hasSoleBody = false;
+        boolean elseChain = false;
+        ScriptEntry firstElse = null;
+        List<ScriptEntry> moreElses = null;
         if (scriptEntry.getInsideList() != null) {
             ScriptEntry upcoming = scriptEntry.getResidingQueue().peekPending();
             if (upcoming == null || !(upcoming.getCommand() instanceof ElseCommand)) {
@@ -191,13 +195,7 @@ public class IfCommand extends BracedCommand {
             // 'false' - the body is NOT cloned here. parseArgs runs on every execution, and cloning every line of every branch before the
             // condition has even been read costs a ScriptEntry clone per line whether that branch runs or not. execute clones the one branch
             // it picks, through BracedCommand.duplicateBracedSection.
-            List<BracedData> allData = new ArrayList<>();
-            BracedData ifRef = new BracedData();
-            ifRef.entry = scriptEntry;
-            ifRef.value = getBracedCommands(scriptEntry, false).get(0).value;
-            ifRef.key = parsed.key;
-            ifRef.args = parsed.bracedArgs;
-            allData.add(ifRef);
+            elseChain = true;
             while (true) {
                 ScriptEntry nextEntry = scriptEntry.getResidingQueue().peekPending();
                 if (nextEntry == null || !(nextEntry.getCommand() instanceof ElseCommand)) {
@@ -211,15 +209,16 @@ public class IfCommand extends BracedCommand {
                 nextEntry.context = scriptEntry.context;
                 nextEntry.entryData = scriptEntry.entryData;
                 nextEntry.queue = scriptEntry.queue;
-                BracedData elseRef = new BracedData();
-                elseRef.value = getBracedCommands(nextEntry, false).get(0).value;
-                elseRef.entry = nextEntry;
-                ParsedIf elseParsed = parsedFor(nextEntry, "else");
-                elseRef.key = elseParsed.key;
-                elseRef.args = elseParsed.bracedArgs;
-                allData.add(elseRef);
+                if (firstElse == null) {
+                    firstElse = nextEntry;
+                }
+                else {
+                    if (moreElses == null) {
+                        moreElses = new ArrayList<>(2);
+                    }
+                    moreElses.add(nextEntry);
+                }
             }
-            braces = allData;
             }
         }
         else if (has_brace) {
@@ -229,7 +228,7 @@ public class IfCommand extends BracedCommand {
         List<String> subcommand = !has_brace && (parsed.hasSubcommand || parsed.hasElsecommand) ? parsed.subcommand : null;
         List<String> comparisons = parsed.comparisons;
         if (scriptEntry.debugThisLine) {
-            Debug.report(scriptEntry, "IF", db("use_braces", braces != null || hasSoleBody));
+            Debug.report(scriptEntry, "IF", db("use_braces", braces != null || hasSoleBody || elseChain));
         }
         if (CoreConfiguration.debugVerbose) {
             Debug.log("comparisons=" + comparisons + ", sc:" + subcommand + ", ec:" + elsecommand);
@@ -275,6 +274,9 @@ public class IfCommand extends BracedCommand {
             scriptEntry.getResidingQueue().injectEntriesAtStart(soleList);
             return;
         }
+        if (elseChain) {
+            braces = first_set ? Collections.singletonList(ifBraceFor(scriptEntry, parsed)) : elseChainFor(firstElse, moreElses);
+        }
         if (braces != null) {
             if (braces.isEmpty()) {
                 Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
@@ -284,7 +286,9 @@ public class IfCommand extends BracedCommand {
                 if (CoreConfiguration.debugVerbose) {
                     Debug.log("Running the first set");
                 }
-                Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
+                if (scriptEntry.debugThisLine) {
+                    Debug.echoDebug(scriptEntry, "<Y>If command passed, running block.");
+                }
                 List<ScriptEntry> bracedCommandsList = branchBodyFor(scriptEntry, 0, braces.get(0));
                 if (bracedCommandsList == null) {
                     Debug.echoError(scriptEntry, "Failed to parse IF command: mis-aligned bracing, empty subsections, or other basic formatting error.");
@@ -345,7 +349,42 @@ public class IfCommand extends BracedCommand {
                 }
             }
         }
-        Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
+        if (scriptEntry.debugThisLine) {
+            Debug.echoDebug(scriptEntry, "<Y>No part of the if command passed, no block will run.");
+        }
+    }
+
+    private static BracedData ifBraceFor(ScriptEntry scriptEntry, ParsedIf parsed) {
+        BracedData ifRef = new BracedData();
+        ifRef.entry = scriptEntry;
+        ifRef.value = getBracedCommands(scriptEntry, false).get(0).value;
+        ifRef.key = parsed.key;
+        ifRef.args = parsed.bracedArgs;
+        return ifRef;
+    }
+
+    private static void addElseBrace(List<BracedData> allData, ScriptEntry nextEntry) {
+        BracedData elseRef = new BracedData();
+        elseRef.value = getBracedCommands(nextEntry, false).get(0).value;
+        elseRef.entry = nextEntry;
+        ParsedIf elseParsed = parsedFor(nextEntry, "else");
+        elseRef.key = elseParsed.key;
+        elseRef.args = elseParsed.bracedArgs;
+        allData.add(elseRef);
+    }
+
+    private static List<BracedData> elseChainFor(ScriptEntry firstElse, List<ScriptEntry> moreElses) {
+        List<BracedData> allData = new ArrayList<>(moreElses == null ? 2 : moreElses.size() + 2);
+        allData.add(null);
+        if (firstElse != null) {
+            addElseBrace(allData, firstElse);
+        }
+        if (moreElses != null) {
+            for (ScriptEntry entry : moreElses) {
+                addElseBrace(allData, entry);
+            }
+        }
+        return allData;
     }
 
     /**

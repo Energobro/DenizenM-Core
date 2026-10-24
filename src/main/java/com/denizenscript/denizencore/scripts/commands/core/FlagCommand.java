@@ -5,6 +5,7 @@ import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
 import com.denizenscript.denizencore.flags.AbstractFlagTracker;
 import com.denizenscript.denizencore.flags.FlaggableObject;
 import com.denizenscript.denizencore.objects.Argument;
+import com.denizenscript.denizencore.objects.ObjectFetcher;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
@@ -18,6 +19,7 @@ import com.denizenscript.denizencore.utilities.data.DataActionType;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -171,22 +173,28 @@ public class FlagCommand extends AbstractCommand {
                 && !arg.hasPrefix()) {
                 scriptEntry.addObject("targets", targetsFor(scriptEntry, arg));
             }
-            else if (!scriptEntry.hasObject("expiration")
-                    && arg.matchesPrefix("expire", "expires", "expiration", "duration")
-                    && (arg.matchesArgumentType(TimeTag.class) || arg.matchesArgumentType(DurationTag.class))) {
-                if (arg.matchesArgumentType(TimeTag.class)) {
+            else {
+                boolean expirationPrefix = !scriptEntry.hasObject("expiration") && arg.matchesPrefix("expire", "expires", "expiration", "duration");
+                CachedAction knownDuration = expirationPrefix ? knownDurationFor(scriptEntry, arg) : null;
+                if (knownDuration != null) {
+                    scriptEntry.addObject("expiration", new TimeTag(DenizenCore.currentTimeMillis + knownDuration.expireMillis, ZoneId.systemDefault()));
+                    continue;
+                }
+                int expiration = expirationPrefix ? expirationKindOf(arg) : EXPIRATION_NONE;
+                if (expiration == EXPIRATION_TIME) {
                     scriptEntry.addObject("expiration", arg.asType(TimeTag.class));
                 }
-                else {
-                    TimeTag now = TimeTag.now();
-                    scriptEntry.addObject("expiration", new TimeTag(now.millis() + arg.asType(DurationTag.class).getMillis(), now.instant.getZone()));
+                else if (expiration == EXPIRATION_DURATION) {
+                    long millis = arg.asType(DurationTag.class).getMillis();
+                    rememberDuration(scriptEntry, arg, millis);
+                    scriptEntry.addObject("expiration", new TimeTag(DenizenCore.currentTimeMillis + millis, ZoneId.systemDefault()));
                 }
-            }
-            else if (!scriptEntry.hasObject("flag_action")) {
-                scriptEntry.addObject("flag_action", flagActionFor(scriptEntry, arg));
-            }
-            else {
-                arg.reportUnhandled();
+                else if (!scriptEntry.hasObject("flag_action")) {
+                    scriptEntry.addObject("flag_action", flagActionFor(scriptEntry, arg));
+                }
+                else {
+                    arg.reportUnhandled();
+                }
             }
         }
         if (!scriptEntry.hasObject("targets")) {
@@ -195,6 +203,37 @@ public class FlagCommand extends AbstractCommand {
         if (!scriptEntry.hasObject("flag_action")) {
             throw new InvalidArgumentsException("Must specify a flag to set!");
         }
+    }
+
+    public static final int EXPIRATION_NONE = 0, EXPIRATION_TIME = 1, EXPIRATION_DURATION = 2;
+
+    public static int expirationKindOf(Argument arg) {
+        if (arg.matchesArgumentType(TimeTag.class)) {
+            return EXPIRATION_TIME;
+        }
+        return arg.matchesArgumentType(DurationTag.class) ? EXPIRATION_DURATION : EXPIRATION_NONE;
+    }
+
+    public static boolean isFixedText(Argument arg) {
+        return arg.object instanceof ElementTag element && element.isRawInput;
+    }
+
+    public static CachedAction knownDurationFor(ScriptEntry scriptEntry, Argument arg) {
+        CachedAction cached = cacheOf(scriptEntry);
+        if (cached != null && cached.expireText != null && isFixedText(arg) && cached.expireText.equals(arg.object.toString())) {
+            return cached;
+        }
+        return null;
+    }
+
+    public static void rememberDuration(ScriptEntry scriptEntry, Argument arg, long millis) {
+        if (!isFixedText(arg)) {
+            return;
+        }
+        CachedAction updated = CachedAction.copyOf(cacheOf(scriptEntry));
+        updated.expireText = arg.object.toString();
+        updated.expireMillis = millis;
+        scriptEntry.internal.specialProcessedData = updated;
     }
 
     public static class FlagActionProvider extends ActionableDataProvider {
@@ -259,7 +298,8 @@ public class FlagCommand extends AbstractCommand {
      * <p>
      * Parsing it costs a split, a key scan and an {@link com.denizenscript.denizencore.objects.ObjectFetcher} lookup for the value,
      * and a line like 'flag server counter:5' hands over the same text on every execution. The text compared here is the argument's
-     * value after tags are filled in, so a line whose value really does change per run misses the cache and parses as before.
+     * value after tags are filled in, so a line whose value really does change per run misses the cache. When only the value after
+     * 'key:action:' changes, as in 'flag server list:->:<[value]>', the key and the action are kept and only the value is read again.
      */
     public static class CachedAction {
         public String text;
@@ -269,6 +309,38 @@ public class FlagCommand extends AbstractCommand {
         public ObjectTag inputValue;
         public String targetsText;
         public ListTag targets;
+        public String prefix;
+        public DataActionType prefixType;
+        public String prefixKey;
+        public int prefixIndex;
+        public String objectPrefix;
+        public String objectKey;
+        public int objectIndex;
+        public String expireText;
+        public long expireMillis;
+
+        public static CachedAction copyOf(CachedAction cached) {
+            CachedAction updated = new CachedAction();
+            if (cached != null) {
+                updated.text = cached.text;
+                updated.type = cached.type;
+                updated.key = cached.key;
+                updated.index = cached.index;
+                updated.inputValue = cached.inputValue;
+                updated.targetsText = cached.targetsText;
+                updated.targets = cached.targets;
+                updated.prefix = cached.prefix;
+                updated.prefixType = cached.prefixType;
+                updated.prefixKey = cached.prefixKey;
+                updated.prefixIndex = cached.prefixIndex;
+                updated.objectPrefix = cached.objectPrefix;
+                updated.objectKey = cached.objectKey;
+                updated.objectIndex = cached.objectIndex;
+                updated.expireText = cached.expireText;
+                updated.expireMillis = cached.expireMillis;
+            }
+            return updated;
+        }
     }
 
     /**
@@ -289,6 +361,9 @@ public class FlagCommand extends AbstractCommand {
      * once would be a race.
      */
     public static ListTag targetsFor(ScriptEntry scriptEntry, Argument arg) {
+        if (arg.object instanceof FlaggableObject) {
+            return arg.asType(ListTag.class);
+        }
         String text = arg.getRawValue();
         CachedAction cached = cacheOf(scriptEntry);
         if (cached != null && cached.targets != null && cached.targetsText.equals(text)) {
@@ -300,14 +375,7 @@ public class FlagCommand extends AbstractCommand {
                 return parsed;
             }
         }
-        CachedAction updated = new CachedAction();
-        if (cached != null) {
-            updated.text = cached.text;
-            updated.type = cached.type;
-            updated.key = cached.key;
-            updated.index = cached.index;
-            updated.inputValue = cached.inputValue;
-        }
+        CachedAction updated = CachedAction.copyOf(cached);
         updated.targetsText = text;
         updated.targets = parsed;
         scriptEntry.internal.specialProcessedData = updated;
@@ -315,6 +383,9 @@ public class FlagCommand extends AbstractCommand {
     }
 
     public static DataAction flagActionFor(ScriptEntry scriptEntry, Argument arg) {
+        if (arg.hasPrefix() && !isFixedText(arg)) {
+            return objectActionFor(scriptEntry, arg);
+        }
         String text = arg.getRawValue();
         CachedAction cached = cacheOf(scriptEntry);
         if (cached != null && cached.text != null && cached.text.equals(text)) {
@@ -326,22 +397,83 @@ public class FlagCommand extends AbstractCommand {
             reused.inputValue = cached.inputValue;
             return reused;
         }
+        boolean textParsed = (arg.object instanceof ElementTag element && element.isRawInput) || !arg.hasPrefix();
+        if (textParsed && cached != null && cached.prefix != null && text.startsWith(cached.prefix)) {
+            String value = text.substring(cached.prefix.length());
+            DataAction reused = new DataAction();
+            reused.provider = new FlagActionProvider();
+            reused.type = cached.prefixType;
+            reused.key = cached.prefixKey;
+            reused.index = cached.prefixIndex;
+            reused.inputValue = cached.prefixType == DataActionType.INSERT ? ObjectFetcher.pickObjectFor(value, scriptEntry.context) : new ElementTag(value);
+            return reused;
+        }
         DataAction parsed = DataActionHelper.parse(new FlagActionProvider(), arg, scriptEntry.context);
-        if (parsed.inputValue != null && !(parsed.inputValue instanceof ElementTag)) {
+        String prefix = textParsed ? valuePrefixOf(text) : null;
+        boolean cacheText = parsed.inputValue == null || parsed.inputValue instanceof ElementTag;
+        if (!cacheText && prefix == null) {
             return parsed;
         }
         CachedAction updated = new CachedAction();
         if (cached != null) {
             updated.targetsText = cached.targetsText;
             updated.targets = cached.targets;
+            updated.objectPrefix = cached.objectPrefix;
+            updated.objectKey = cached.objectKey;
+            updated.objectIndex = cached.objectIndex;
+            updated.expireText = cached.expireText;
+            updated.expireMillis = cached.expireMillis;
         }
-        updated.text = text;
-        updated.type = parsed.type;
-        updated.key = parsed.key;
-        updated.index = parsed.index;
-        updated.inputValue = parsed.inputValue;
+        if (cacheText) {
+            updated.text = text;
+            updated.type = parsed.type;
+            updated.key = parsed.key;
+            updated.index = parsed.index;
+            updated.inputValue = parsed.inputValue;
+        }
+        if (prefix != null) {
+            updated.prefix = prefix;
+            updated.prefixType = parsed.type;
+            updated.prefixKey = parsed.key;
+            updated.prefixIndex = parsed.index;
+        }
         scriptEntry.internal.specialProcessedData = updated;
         return parsed;
+    }
+
+    public static DataAction objectActionFor(ScriptEntry scriptEntry, Argument arg) {
+        CachedAction cached = cacheOf(scriptEntry);
+        if (cached != null && cached.objectPrefix != null && cached.objectPrefix.equals(arg.prefix)) {
+            DataAction reused = new DataAction();
+            reused.provider = new FlagActionProvider();
+            reused.type = DataActionType.SET;
+            reused.key = cached.objectKey;
+            reused.index = cached.objectIndex;
+            reused.inputValue = arg.object;
+            return reused;
+        }
+        DataAction parsed = DataActionHelper.parse(new FlagActionProvider(), arg, scriptEntry.context);
+        CachedAction updated = CachedAction.copyOf(cached);
+        updated.objectPrefix = arg.prefix;
+        updated.objectKey = parsed.key;
+        updated.objectIndex = parsed.index;
+        scriptEntry.internal.specialProcessedData = updated;
+        return parsed;
+    }
+
+    public static String valuePrefixOf(String text) {
+        int keyEnd = text.indexOf(':');
+        if (keyEnd < 0) {
+            return null;
+        }
+        int actionEnd = text.indexOf(':', keyEnd + 1);
+        if (actionEnd < 0) {
+            return null;
+        }
+        return switch (text.substring(keyEnd + 1, actionEnd)) {
+            case "->", "<-", "|", "!|", "+", "-", "*", "/" -> text.substring(0, actionEnd + 1);
+            default -> null;
+        };
     }
 
     @Override

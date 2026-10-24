@@ -204,13 +204,23 @@ public class ForeachCommand extends BracedCommand {
             }
             if (datum.keys != null) {
                 datum.keyName = keyName;
-                datum.keyHolder = new StringHolder(datum.keyName);
-                datum.originalKeyValue = queue.getDefinitionObject(datum.keyName);
+                StringHolder keyHolder = scriptEntry.internal.loopKeyHolder;
+                if (keyHolder == null || !keyHolder.str.equals(keyName)) {
+                    keyHolder = new StringHolder(keyName);
+                    scriptEntry.internal.loopKeyHolder = keyHolder;
+                }
+                datum.keyHolder = keyHolder;
+                datum.originalKeyValue = queue.getDefinitionObject(keyHolder);
             }
             datum.valueName = asName;
-            datum.valueHolder = new StringHolder(datum.valueName);
-            datum.originalValue = queue.getDefinitionObject(datum.valueName);
-            datum.originalIndexValue = queue.getDefinitionObject("loop_index");
+            StringHolder valueHolder = scriptEntry.internal.loopValueHolder;
+            if (valueHolder == null || !valueHolder.str.equals(asName)) {
+                valueHolder = new StringHolder(asName);
+                scriptEntry.internal.loopValueHolder = valueHolder;
+            }
+            datum.valueHolder = valueHolder;
+            datum.originalValue = queue.getDefinitionObject(valueHolder);
+            datum.originalIndexValue = queue.getDefinitionObject(ScriptQueue.LOOP_INDEX_KEY);
             datum.slotTable = scriptEntry.internal.slotTable;
             datum.valueSlot = ScriptQueue.slotFor(scriptEntry, datum.valueHolder);
             datum.keySlot = datum.keyHolder == null ? DefinitionSlots.NO_SLOT : ScriptQueue.slotFor(scriptEntry, datum.keyHolder);

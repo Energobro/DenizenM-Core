@@ -210,7 +210,7 @@ public class WhileCommand extends BracedCommand {
             else {
                 ScriptEntry.resetBodyForReuse(bracedCommandsList);
             }
-            datum.originalIndexValue = queue.getDefinitionObject("loop_index");
+            datum.originalIndexValue = queue.getDefinitionObject(ScriptQueue.LOOP_INDEX_KEY);
             datum.slotTable = scriptEntry.internal.slotTable;
             datum.indexSlot = ScriptQueue.slotFor(scriptEntry, ScriptQueue.LOOP_INDEX_KEY);
             scriptEntry.setInstant(true);

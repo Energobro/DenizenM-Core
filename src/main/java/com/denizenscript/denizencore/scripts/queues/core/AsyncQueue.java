@@ -117,6 +117,11 @@ public class AsyncQueue extends TimedQueue {
     }
 
     @Override
+    public void resumeOnQueueThread(Runnable run) {
+        runOnQueueThread(run);
+    }
+
+    @Override
     public void wake() {
         synchronized (sleepLock) {
             sleepLock.notifyAll();
@@ -169,6 +174,8 @@ public class AsyncQueue extends TimedQueue {
         }
     }
 
+    public volatile long workerStartedNanos = 0;
+
     /** Whether the count warning has already been given, so that a busy server gets it once rather than on every queue it starts. */
     private static volatile boolean warnedOnCount = false;
 
@@ -178,6 +185,7 @@ public class AsyncQueue extends TimedQueue {
     /** The worker loop. Runs on the async thread for the entire life of the queue. */
     public void runLoop() {
         ownerThread = Thread.currentThread();
+        workerStartedNanos = System.nanoTime();
         try {
             while (is_started && !isStopped && !abandoned) {
                 runPendingTasks();
@@ -280,6 +288,22 @@ public class AsyncQueue extends TimedQueue {
                 Thread.currentThread().interrupt();
                 abandoned = true;
             }
+        }
+    }
+
+    public static void wakeDueQueues() {
+        boolean expectRequest = false;
+        for (AsyncQueue queue : runningQueues) {
+            if (queue.isStopped || queue.abandoned || !queue.is_started || queue.holdingOn != null || queue.isPaused() || queue.isDelayed()) {
+                continue;
+            }
+            queue.wake();
+            if (queue.mainThreadWaitCount > 0) {
+                expectRequest = true;
+            }
+        }
+        if (expectRequest) {
+            DenizenCore.noteWorkerDispatch(CoreConfiguration.mainThreadWaitLingerMicros * 1000L);
         }
     }
 

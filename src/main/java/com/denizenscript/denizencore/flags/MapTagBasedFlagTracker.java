@@ -11,6 +11,7 @@ import com.denizenscript.denizencore.utilities.text.StringHolder;
 import java.lang.invoke.VarHandle;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
 
@@ -266,19 +267,88 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
     public void setFlag(String key, ObjectTag value, TimeTag expiration, boolean doFlaggify) {
         // Split and built before the lock is taken. Neither reads what is stored, and converting a value can be real work -
         // holding the lock through it would be holding it against the main thread for no reason.
-        List<String> splitKey = CoreUtilities.contains(key, '.') ? CoreUtilities.split(key, '.') : null;
+        FlagPath path = CoreUtilities.contains(key, '.') ? pathFor(key) : null;
         MapTag resultMap = value == null ? null : buildFlagMap(value, expiration, doFlaggify);
         synchronized (getWriteLock()) {
-            if (splitKey == null) {
+            if (path == null) {
                 // A flat key replaces its root map whole, and the root storage publishes that in one step - there is nothing to tear.
                 setRootMap(key, resultMap);
                 return;
             }
-            if (resultMap != null && setDeepFlagInPlace(splitKey, resultMap)) {
+            if (resultMap != null && setDeepFlagInPlace(path, resultMap)) {
                 return;
             }
-            setDeepFlagRebuilding(splitKey, resultMap);
+            setDeepFlagRebuilding(path.parts, resultMap);
         }
+    }
+
+    public static final class FlagPath {
+
+        public final List<String> parts;
+
+        public final StringHolder[] holders;
+
+        public FlagPath(List<String> parts) {
+            this.parts = parts;
+            holders = new StringHolder[parts.size()];
+            for (int i = 0; i < holders.length; i++) {
+                holders[i] = new StringHolder(parts.get(i));
+            }
+        }
+    }
+
+    public static final int PATH_CACHE_LIMIT = 4096;
+
+    public static final ConcurrentHashMap<String, FlagPath> pathCache = new ConcurrentHashMap<>();
+
+    public static FlagPath pathFor(String key) {
+        FlagPath path = pathCache.get(key);
+        if (path == null) {
+            if (pathCache.size() >= PATH_CACHE_LIMIT) {
+                pathCache.clear();
+            }
+            path = new FlagPath(CoreUtilities.split(key, '.'));
+            pathCache.put(key, path);
+        }
+        return path;
+    }
+
+    public boolean setDeepFlagInPlace(FlagPath path, MapTag resultMap) {
+        StringHolder[] keys = path.holders;
+        MapTag rootMap = getRootMap(keys[0]);
+        if (rootMap == null) {
+            return false;
+        }
+        MapTag map = null;
+        for (int i = 0; i < keys.length - 1; i++) {
+            MapTag flagMap;
+            if (i == 0) {
+                flagMap = rootMap;
+            }
+            else {
+                ObjectTag subFlagMap = map.getObject(keys[i]);
+                if (!(subFlagMap instanceof MapTag)) {
+                    return false;
+                }
+                flagMap = (MapTag) subFlagMap;
+            }
+            if (flagMap.containsKey(expirationString)) {
+                return false;
+            }
+            ObjectTag innerMapTag = flagMap.getObject(valueString);
+            if (!(innerMapTag instanceof MapTag)) {
+                return false;
+            }
+            map = (MapTag) innerMapTag;
+        }
+        StringHolder endKey = keys[keys.length - 1];
+        if (!map.containsKey(endKey)) {
+            return false;
+        }
+        VarHandle.releaseFence();
+        map.putObject(endKey, resultMap);
+        setRootMap(keys[0], rootMap);
+        return true;
     }
 
     /**

@@ -1,5 +1,6 @@
 package com.denizenscript.denizencore.scripts.commands.queue;
 
+import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
 import com.denizenscript.denizencore.objects.core.MapTag;
@@ -10,12 +11,12 @@ import com.denizenscript.denizencore.scripts.commands.generator.ArgDefaultNull;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgName;
 import com.denizenscript.denizencore.scripts.commands.generator.ArgPrefixed;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
-import com.denizenscript.denizencore.utilities.text.StringHolder;
 import com.denizenscript.denizencore.scripts.queues.core.AsyncQueue;
 import com.denizenscript.denizencore.scripts.queues.core.TimedQueue;
 import com.denizenscript.denizencore.utilities.CoreConfiguration;
 import com.denizenscript.denizencore.utilities.DefinitionStore;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.List;
 import java.util.concurrent.ConcurrentHashMap;
@@ -147,10 +148,11 @@ public class AsyncCommand extends BracedCommand {
                 data.reachedEnd = true;
                 // Reaching the marker means the block ran to its end, so this is the honest cost of its contents,
                 // measured the same way whether it ran on a worker or inline.
-                long elapsed = System.nanoTime() - data.startNanos;
-                if (elapsed > owner.internal.asyncBlockMaxNanos) {
-                    owner.internal.asyncBlockMaxNanos = elapsed;
+                long started = data.startNanos;
+                if (scriptEntry.getResidingQueue() instanceof AsyncQueue workerQueue && workerQueue.workerStartedNanos > started) {
+                    started = workerQueue.workerStartedNanos;
                 }
+                owner.sharedInternal().recordAsyncBlockCost(System.nanoTime() - started);
             }
             else {
                 Debug.echoError(scriptEntry, "Async CALLBACK invalid: not a real callback!");
@@ -252,18 +254,11 @@ public class AsyncCommand extends BracedCommand {
             subQueue.start();
             return;
         }
-        subQueue.callBack(() -> outerQueue.runOnQueueThread(() -> finishBlock(scriptEntry, outerQueue, subQueue, data)));
+        subQueue.callBack(() -> outerQueue.resumeOnQueueThread(() -> finishBlock(scriptEntry, outerQueue, subQueue, data)));
+        DenizenCore.noteWorkerDispatch(scriptEntry.sharedInternal().asyncBlockMaxNanos);
         subQueue.start();
     }
 
-    /**
-     * Returns true if this block has run before and never cost enough main thread time to be worth handing to another thread.
-     * <p>
-     * A block only pays off when the work it moves off the main thread is worth more than the tick of latency the hand-off costs the script.
-     * Rather than making script writers judge that, each block times itself (see {@link AsyncData#startNanos}) and answers it from its own history.
-     * The first run always goes to a worker, since nothing is known about it yet, and one run that is expensive settles the question for good -
-     * the maximum is what's compared, so a block that is usually fast but sometimes slow keeps its thread.
-     */
     private static ScriptEntry markerFor(ScriptEntry scriptEntry) {
         ScriptEntry.ScriptEntryInternal shared = scriptEntry.sharedInternal();
         ScriptEntry prototype = shared.asyncMarkerPrototype;
@@ -276,6 +271,14 @@ public class AsyncCommand extends BracedCommand {
         return marker;
     }
 
+    /**
+     * Returns true if this block has run before and never cost enough main thread time to be worth handing to another thread.
+     * <p>
+     * A block only pays off when the work it moves off the main thread is worth more than the tick of latency the hand-off costs the script.
+     * Rather than making script writers judge that, each block times itself (see {@link AsyncData#startNanos}) and answers it from its own history.
+     * The first runs always go to a worker, since nothing is known about them yet, and one run that is expensive settles the question for good -
+     * the maximum is what's compared, so a block that is usually fast but sometimes slow keeps its thread.
+     */
     public static boolean isKnownCheap(ScriptEntry scriptEntry, boolean detached) {
         if (detached) {
             // 'detached' is a promise not to wait, which running inline would break no matter how cheap the contents are.
@@ -285,7 +288,7 @@ public class AsyncCommand extends BracedCommand {
         if (threshold <= 0) {
             return false;
         }
-        long maxSeen = scriptEntry.internal.asyncBlockMaxNanos;
+        long maxSeen = scriptEntry.sharedInternal().asyncBlockMaxNanos;
         return maxSeen >= 0 && maxSeen < threshold;
     }
 

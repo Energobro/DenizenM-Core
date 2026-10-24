@@ -100,7 +100,7 @@ public class CoreConfiguration {
     public static int asyncQueueCountLimit = 256;
 
     /**
-     * An <@link command async> block whose contents have never taken longer than this (in nanoseconds) runs on the main thread instead of a worker.
+     * An <@link command async> block or '~' waited command whose contents have never taken longer than this (in nanoseconds) runs on the main thread instead of a worker.
      * <p>
      * Handing a block to another thread costs the script up to a tick of waiting, because the main thread can only resume it on its next pass.
      * That is worth paying to keep a slow block off the main thread, and pure waste for a block the main thread would not have noticed.
