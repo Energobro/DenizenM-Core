@@ -423,17 +423,39 @@ public class DebugInternals {
     /** Used for "log" to get class names. */
     public static boolean canGetClass = true;
 
+    private static final ClassValue<String> classNames = new ClassValue<>() {
+        @Override
+        protected String computeValue(Class<?> clazz) {
+            String name = clazz.getSimpleName();
+            synchronized (classNameCache) {
+                classNameCache.put(clazz, name);
+            }
+            return name;
+        }
+    };
+
     /** Helper to get a class simple name with less JVM overhead using a cache. */
     public static String getClassNameOpti(Class<?> clazz) {
-        return classNameCache.computeIfAbsent(clazz, k -> clazz.getSimpleName());
+        return classNames.get(clazz);
     }
 
     /** Used for "log" to get class names. */
     public static final Map<Class<?>, String> classFullNameCache = new WeakHashMap<>();
 
+    private static final ClassValue<String> classFullNames = new ClassValue<>() {
+        @Override
+        protected String computeValue(Class<?> clazz) {
+            String name = clazz.getName();
+            synchronized (classFullNameCache) {
+                classFullNameCache.put(clazz, name);
+            }
+            return name;
+        }
+    };
+
     /** Helper to get a class full name with less JVM overhead using a cache. */
     public static String getFullClassNameOpti(Class<?> clazz) {
-        return classFullNameCache.computeIfAbsent(clazz, k -> clazz.getName());
+        return classFullNames.get(clazz);
     }
 
     /** Helper to get the caller for a 'log' message. */

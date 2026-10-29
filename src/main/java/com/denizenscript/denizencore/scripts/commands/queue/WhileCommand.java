@@ -86,7 +86,8 @@ public class WhileCommand extends BracedCommand {
     public static final ScriptQueue.LoopIteration ITERATION = (queue, owner) -> {
         WhileData data = (WhileData) owner.getData();
         data.index++;
-        if (CoreUtilities.monotonicMillis() - data.LastChecked < 50) {
+        long now = CoreUtilities.monotonicMillis();
+        if (now - data.LastChecked < 50) {
             data.instaTicks++;
             if (data.instaTicks > CoreConfiguration.whileMaxLoops && CoreConfiguration.whileMaxLoops != 0) {
                 return false;
@@ -95,7 +96,7 @@ public class WhileCommand extends BracedCommand {
         else {
             data.instaTicks = 0;
         }
-        data.LastChecked = CoreUtilities.monotonicMillis();
+        data.LastChecked = now;
         if (!parsedFor(owner).condition.evaluate(owner)) {
             data.reapplyAtEnd(queue);
             if (owner.dbCallShouldDebug()) {
@@ -135,6 +136,7 @@ public class WhileCommand extends BracedCommand {
         }
         parsed.condition = parsed.comparisons.isEmpty() ? null : IfCommand.ArgComparer.compile(parsed.comparisons);
         entry.internal.specialProcessedData = parsed;
+        entry.sharedInternal().specialProcessedData = parsed;
         return parsed;
     }
 

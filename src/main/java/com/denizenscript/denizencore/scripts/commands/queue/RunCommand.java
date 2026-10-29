@@ -1,6 +1,6 @@
 package com.denizenscript.denizencore.scripts.commands.queue;
 
-import com.denizenscript.denizencore.exceptions.InvalidArgumentsException;
+import com.denizenscript.denizencore.exceptions.InvalidArgumentsRuntimeException;
 import com.denizenscript.denizencore.objects.*;
 import com.denizenscript.denizencore.objects.core.*;
 import com.denizenscript.denizencore.scripts.containers.core.TaskScriptContainer;
@@ -13,9 +13,11 @@ import com.denizenscript.denizencore.DenizenCore;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.commands.Holdable;
+import com.denizenscript.denizencore.scripts.commands.generator.*;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 import com.denizenscript.denizencore.utilities.text.StringHolder;
 
+import java.util.ArrayList;
 import java.util.Map;
 import java.util.function.Consumer;
 
@@ -27,6 +29,11 @@ public class RunCommand extends AbstractCommand implements Holdable {
         setRequiredArguments(1, -1);
         isProcedural = true;
         allowedDynamicPrefixes = true;
+        addRemappedPrefixes("id", "i");
+        addRemappedPrefixes("def", "d", "define", "c", "context");
+        generateDebug = false;
+        generatorInfiniteArgs = true;
+        autoCompile();
     }
 
     // <--[command]
@@ -122,112 +129,177 @@ public class RunCommand extends AbstractCommand implements Holdable {
         return CoreConfiguration.allowAsyncScripts && scriptEntry.hasRawArgument("async");
     }
 
-    @Override
-    public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
-        MapTag defMap = new MapTag();
-        for (Argument arg : scriptEntry) {
-            if (arg.matchesPrefix("i", "id")) {
-                scriptEntry.addObject("id", arg.asElement());
+    public static class RunWork {
+        public ScriptTag script;
+        public ElementTag path;
+        public ElementTag id;
+        public ListTag definitions;
+        public DurationTag speed;
+        public DurationTag delay;
+        public boolean instant;
+        public boolean async;
+        public MapTag defMap;
+        public ArrayList<Argument> lateDefArgs;
+        public ArrayList<MapTag> lateDefs;
+
+        public void addLateDefs(Argument arg, MapTag defs) {
+            if (lateDefArgs == null) {
+                lateDefArgs = new ArrayList<>();
+                lateDefs = new ArrayList<>();
             }
-            else if (arg.matchesPrefix("d", "def", "define", "c", "context")) {
-                scriptEntry.addObject("definitions", arg.asType(ListTag.class));
-            }
-            else if (arg.matchesPrefix("defmap")
-                    && arg.matchesArgumentType(MapTag.class)) {
-                defMap.putAll(arg.asType(MapTag.class));
-            }
-            // The prefix checks matter here: 'matches' compares only the value, so without them "def.x:async" or "def.x:instant"
-            // would be read as these flags and the definition would be lost with no error at all.
-            else if (!arg.hasPrefix() && arg.matches("instant", "instantly")) {
-                scriptEntry.addObject("instant", new ElementTag(true));
-            }
-            else if (!arg.hasPrefix() && arg.matches("async")) {
-                scriptEntry.addObject("async", new ElementTag(true));
-            }
-            else if (arg.matchesPrefix("delay")
-                    && arg.matchesArgumentType(DurationTag.class)) {
-                scriptEntry.addObject("delay", arg.asType(DurationTag.class));
-            }
-            else if (arg.hasPrefix()
-                    && arg.getPrefix().getRawValue().startsWith("def.")) {
-                defMap.putObject(arg.getPrefix().getRawValue().substring("def.".length()), arg.object);
-            }
-            else if (!arg.hasPrefix() && arg.getRawValue().startsWith("def.") && arg.getRawValue().contains(":")) {
-                int colon = arg.getRawValue().indexOf(':');
-                defMap.putObject(arg.getRawValue().substring("def.".length(), colon), new ElementTag(arg.getRawValue().substring(colon + 1)));
-            }
-            else if (arg.matches("local", "locally")) {
-                Deprecations.locallyArgument.warn(scriptEntry);
-                scriptEntry.addObject("script", scriptEntry.getScript());
-            }
-            else if (!scriptEntry.hasObject("speed")
-                    && arg.matchesPrefix("speed")
-                    && arg.matchesArgumentType(DurationTag.class)) {
-                scriptEntry.addObject("speed", arg.asType(DurationTag.class));
-            }
-            else if (!scriptEntry.hasObject("script")
-                    && arg.scriptTagValue() != null
-                    && arg.limitToOnlyPrefix("script")) {
-                scriptEntry.addObject("script", arg.scriptTagValue());
-            }
-            else if (!scriptEntry.hasObject("script") && !scriptEntry.hasObject("path")
-                    && !arg.hasPrefix() && arg.asElement().asString().contains(".")) {
-                String path = arg.asElement().asString();
-                int dotIndex = path.indexOf('.');
-                ScriptTag script = ScriptTag.valueOf(path.substring(0, dotIndex), CoreUtilities.noDebugContext);
-                if (script == null) {
-                    arg.reportUnhandled();
-                }
-                else {
-                    scriptEntry.addObject("script", script);
-                    scriptEntry.addObject("path", new ElementTag(path.substring(dotIndex + 1)));
-                }
-            }
-            else if (!scriptEntry.hasObject("path")
-                    && arg.limitToOnlyPrefix("path")) {
-                if (!arg.hasPrefix() && scriptEntry.hasObject("script")) { // TODO: Temporarily allow missing prefix due to common mistake
-                    Debug.echoError("Run command path is missing required 'path:' prefix.");
-                }
-                scriptEntry.addObject("path", arg.asElement());
-            }
-            else {
-                arg.reportUnhandled();
-            }
-        }
-        if (!scriptEntry.hasObject("script")) {
-            throw new InvalidArgumentsException("Must define a SCRIPT to be run.");
-        }
-        if (!defMap.isEmpty()) {
-            scriptEntry.addObject("def_map", defMap);
+            lateDefArgs.add(arg);
+            lateDefs.add(defs);
         }
     }
 
-    @Override
-    public void execute(ScriptEntry scriptEntry) {
-        ElementTag pathElement = scriptEntry.getElement("path");
-        ScriptTag script = scriptEntry.getObjectTag("script");
-        ElementTag instant = scriptEntry.getElement("instant");
-        ElementTag async = scriptEntry.getElement("async");
-        ElementTag id = scriptEntry.getElement("id");
-        DurationTag speed = scriptEntry.getObjectTag("speed");
-        DurationTag delay = scriptEntry.getObjectTag("delay");
-        MapTag defMap = scriptEntry.getObjectTag("def_map");
-        String path = pathElement != null ? pathElement.asString() : null;
-        if (script == null) {
-            Debug.echoError(scriptEntry, "Script run failed (invalid script name)!");
-            return;
+    public static void handleArgument(ScriptEntry scriptEntry, Argument arg, RunWork work) {
+        if (arg.matchesPrefix("i", "id")) {
+            work.id = arg.asElement();
         }
+        else if (arg.matchesPrefix("d", "def", "define", "c", "context")) {
+            work.definitions = arg.asType(ListTag.class);
+        }
+        else if (arg.matchesPrefix("defmap")
+                && arg.matchesArgumentType(MapTag.class)) {
+            work.addLateDefs(arg, arg.asType(MapTag.class));
+        }
+        // The prefix checks matter here: 'matches' compares only the value, so without them "def.x:async" or "def.x:instant"
+        // would be read as these flags and the definition would be lost with no error at all.
+        else if (!arg.hasPrefix() && arg.matches("instant", "instantly")) {
+            work.instant = true;
+        }
+        else if (!arg.hasPrefix() && arg.matches("async")) {
+            work.async = true;
+        }
+        else if (arg.matchesPrefix("delay")
+                && arg.matchesArgumentType(DurationTag.class)) {
+            work.delay = arg.asType(DurationTag.class);
+        }
+        else if (arg.hasPrefix()
+                && arg.getPrefix().getRawValue().startsWith("def.")) {
+            MapTag single = new MapTag();
+            single.putObject(arg.getPrefix().getRawValue().substring("def.".length()), arg.object);
+            work.addLateDefs(arg, single);
+        }
+        else if (!arg.hasPrefix() && arg.getRawValue().startsWith("def.") && arg.getRawValue().contains(":")) {
+            int colon = arg.getRawValue().indexOf(':');
+            MapTag single = new MapTag();
+            single.putObject(arg.getRawValue().substring("def.".length(), colon), new ElementTag(arg.getRawValue().substring(colon + 1)));
+            work.addLateDefs(arg, single);
+        }
+        else if (arg.matches("local", "locally")) {
+            Deprecations.locallyArgument.warn(scriptEntry);
+            work.script = scriptEntry.getScript();
+        }
+        else if (work.speed == null
+                && arg.matchesPrefix("speed")
+                && arg.matchesArgumentType(DurationTag.class)) {
+            work.speed = arg.asType(DurationTag.class);
+        }
+        else if (work.script == null
+                && arg.scriptTagValue() != null
+                && arg.limitToOnlyPrefix("script")) {
+            work.script = arg.scriptTagValue();
+        }
+        else if (work.script == null && work.path == null
+                && !arg.hasPrefix() && arg.asElement().asString().contains(".")) {
+            String path = arg.asElement().asString();
+            int dotIndex = path.indexOf('.');
+            ScriptTag script = ScriptTag.valueOf(path.substring(0, dotIndex), CoreUtilities.noDebugContext);
+            if (script == null) {
+                arg.reportUnhandled();
+            }
+            else {
+                work.script = script;
+                work.path = new ElementTag(path.substring(dotIndex + 1));
+            }
+        }
+        else if (work.path == null
+                && arg.limitToOnlyPrefix("path")) {
+            if (!arg.hasPrefix() && work.script != null) { // TODO: Temporarily allow missing prefix due to common mistake
+                Debug.echoError("Run command path is missing required 'path:' prefix.");
+            }
+            work.path = arg.asElement();
+        }
+        else {
+            arg.reportUnhandled();
+        }
+    }
+
+    public static MapTag orderedDefinitions(ScriptEntry scriptEntry, RunWork work) {
+        if (work.lateDefArgs == null) {
+            return work.defMap;
+        }
+        MapTag result = new MapTag();
+        int[] dynamicIndices = scriptEntry.internal.dynamicPrefixArgs == null ? null : scriptEntry.internal.dynamicPrefixArgs[0];
+        ScriptEntry.InternalArgument[] all = scriptEntry.internal.all_arguments;
+        for (int i = 0; i < all.length; i++) {
+            Argument arg = all[i].aHArg;
+            if (dynamicIndices != null) {
+                int dynamicPos = -1;
+                for (int j = 0; j < dynamicIndices.length; j++) {
+                    if (dynamicIndices[j] == i) {
+                        dynamicPos = j;
+                        break;
+                    }
+                }
+                if (dynamicPos != -1) {
+                    CommandExecutionGenerator.putDynamicPrefixed(result, arg, scriptEntry.internal.dynamicPrefixKeys[0][dynamicPos], "def.");
+                    continue;
+                }
+            }
+            for (int j = 0; j < work.lateDefArgs.size(); j++) {
+                if (work.lateDefArgs.get(j) == arg) {
+                    result.putAll(work.lateDefs.get(j));
+                }
+            }
+        }
+        return result;
+    }
+
+    public static ObjectTag withPrefix(ObjectTag object, String prefix) {
+        if (object != null) {
+            object.setPrefix(prefix);
+        }
+        return object;
+    }
+
+    public static void autoExecute(ScriptEntry scriptEntry,
+                                   @ArgName("id") @ArgPrefixed @ArgDefaultNull ElementTag id,
+                                   @ArgName("def") @ArgPrefixed @ArgDefaultNull ListTag definitions,
+                                   @ArgName("def_map") @ArgDynamicPrefix("def.") @ArgDefaultNull MapTag defMap,
+                                   @ArgName("instant") boolean instant,
+                                   @ArgName("instantly") boolean instantly,
+                                   @ArgName("async") boolean async) {
+        RunWork work = new RunWork();
+        work.id = id;
+        work.definitions = definitions;
+        work.defMap = defMap;
+        work.instant = instant || instantly;
+        work.async = async;
+        for (Argument arg : scriptEntry) {
+            handleArgument(scriptEntry, arg, work);
+        }
+        if (work.script == null) {
+            throw new InvalidArgumentsRuntimeException("Must define a SCRIPT to be run.");
+        }
+        MapTag defs = orderedDefinitions(scriptEntry, work);
+        if (defs != null && defs.isEmpty()) {
+            defs = null;
+        }
+        ScriptTag script = work.script;
+        String path = work.path != null ? work.path.asString() : null;
         if (path != null && !script.getContainer().containsScriptSection(path)) {
             Debug.echoError(scriptEntry, "Script run failed (invalid path)!");
             return;
         }
-        if (instant != null && instant.asBoolean()) {
-            speed = new DurationTag(0);
-        }
-        ListTag definitions = scriptEntry.getObjectTag("definitions");
+        DurationTag speed = work.instant ? new DurationTag(0) : work.speed;
+        DurationTag delay = work.delay;
         if (scriptEntry.dbCallShouldDebug()) {
-            Debug.report(scriptEntry, getName(), script, pathElement, instant, async, speed, delay, id, defMap, definitions);
+            Debug.report(scriptEntry, "RUN", withPrefix(script, "script"), withPrefix(work.path, "path"), work.instant ? db("instant", true) : null, work.async ? db("async", true) : null,
+                    work.instant ? speed : withPrefix(speed, "speed"), withPrefix(delay, "delay"), withPrefix(work.id, "id"), withPrefix(defs, "def_map"), withPrefix(work.definitions, "definitions"));
         }
+        MapTag finalDefs = defs;
         Consumer<ScriptQueue> configure = (queue) -> {
             // Set any delay
             if (delay != null) {
@@ -237,8 +309,8 @@ public class RunCommand extends AbstractCommand implements Holdable {
             if (scriptEntry.shouldWaitFor()) {
                 queue.callBack(() -> scriptEntry.setFinished(true));
             }
-            if (defMap != null) {
-                for (Map.Entry<StringHolder, ObjectTag> val : defMap.entrySet()) {
+            if (finalDefs != null) {
+                for (Map.Entry<StringHolder, ObjectTag> val : finalDefs.entrySet()) {
                     queue.addDefinition(val.getKey().str, val.getValue());
                 }
             }
@@ -249,12 +321,10 @@ public class RunCommand extends AbstractCommand implements Holdable {
             // Preserve procedural status
             queue.procedural = scriptEntry.getResidingQueue().procedural;
         };
-        String idString = id != null ? "FORCE:" + id.asString() : null;
-        boolean isAsync = async != null && async.asBoolean();
-        ScriptQueue result = ScriptUtilities.createAndStartQueue(script.getContainer(), path, scriptEntry.entryData, null, configure, speed, idString, definitions, scriptEntry, isAsync);
+        String idString = work.id != null ? "FORCE:" + work.id.asString() : null;
+        ScriptQueue result = ScriptUtilities.createAndStartQueue(script.getContainer(), path, scriptEntry.entryData, null, configure, speed, idString, work.definitions, scriptEntry, work.async);
         if (result == null) {
             Debug.echoError(scriptEntry, "Script run failed (are you sure it's a task script, and the path exists?)!");
-            return;
         }
     }
 }

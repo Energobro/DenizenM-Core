@@ -208,6 +208,7 @@ public class ForeachCommand extends BracedCommand {
                 if (keyHolder == null || !keyHolder.str.equals(keyName)) {
                     keyHolder = new StringHolder(keyName);
                     scriptEntry.internal.loopKeyHolder = keyHolder;
+                    scriptEntry.sharedInternal().loopKeyHolder = keyHolder;
                 }
                 datum.keyHolder = keyHolder;
                 datum.originalKeyValue = queue.getDefinitionObject(keyHolder);
@@ -217,6 +218,7 @@ public class ForeachCommand extends BracedCommand {
             if (valueHolder == null || !valueHolder.str.equals(asName)) {
                 valueHolder = new StringHolder(asName);
                 scriptEntry.internal.loopValueHolder = valueHolder;
+                scriptEntry.sharedInternal().loopValueHolder = valueHolder;
             }
             datum.valueHolder = valueHolder;
             datum.originalValue = queue.getDefinitionObject(valueHolder);

@@ -9,6 +9,7 @@ import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ScriptTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
+import com.denizenscript.denizencore.scripts.ScriptRegistry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
 
@@ -51,13 +52,40 @@ public class InjectCommand extends AbstractCommand {
         tab.addScriptsOfType(TaskScriptContainer.class);
     }
 
+    public static class ParsedInject {
+        public ScriptTag script;
+        public ElementTag path;
+        public ElementTag instant;
+    }
+
+    public static boolean isFixedLine(ScriptEntry scriptEntry) {
+        ScriptEntry.InternalArgument[] args = scriptEntry.internal.all_arguments;
+        if (args == null) {
+            return false;
+        }
+        for (ScriptEntry.InternalArgument arg : args) {
+            if ((arg.value != null && arg.value.hasTag) || (arg.prefix != null && arg.prefix.value != null && arg.prefix.value.hasTag)) {
+                return false;
+            }
+        }
+        return true;
+    }
+
     @Override
     public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
+        if (scriptEntry.internal.specialProcessedData instanceof ParsedInject parsed && ScriptRegistry.getScriptContainerLowered(parsed.script.getContainer().getLoweredName()) == parsed.script.getContainer()) {
+            scriptEntry.addObject("script", parsed.script);
+            scriptEntry.addObject("path", parsed.path);
+            scriptEntry.addObject("instant", parsed.instant);
+            return;
+        }
+        boolean cacheable = isFixedLine(scriptEntry);
         for (Argument arg : scriptEntry) {
             if (arg.matches("instant", "instantly")) {
                 scriptEntry.addObject("instant", new ElementTag(true));
             }
             else if (arg.matches("local", "locally")) {
+                cacheable = false;
                 Deprecations.locallyArgument.warn(scriptEntry);
                 scriptEntry.addObject("script", scriptEntry.getScript());
             }
@@ -72,6 +100,7 @@ public class InjectCommand extends AbstractCommand {
             int dotIndex = path.indexOf('.');
                 ScriptTag script = ScriptTag.valueOf(path.substring(0, dotIndex), CoreUtilities.noDebugContext);
                 if (script == null) {
+                    cacheable = false;
                     arg.reportUnhandled();
                 }
                 else {
@@ -82,16 +111,26 @@ public class InjectCommand extends AbstractCommand {
             else if (!scriptEntry.hasObject("path")
                     && arg.limitToOnlyPrefix("path")) {
                 if (!arg.hasPrefix() && scriptEntry.hasObject("script")) { // TODO: Temporarily allow missing prefix due to common mistake
+                    cacheable = false;
                     Debug.echoError("Inject command path is missing required 'path:' prefix.");
                 }
                 scriptEntry.addObject("path", arg.asElement());
             }
             else {
+                cacheable = false;
                 arg.reportUnhandled();
             }
         }
         if (!scriptEntry.hasObject("script")) {
             throw new InvalidArgumentsException("Must define a SCRIPT to be injected.");
+        }
+        if (cacheable) {
+            ParsedInject parsed = new ParsedInject();
+            parsed.script = scriptEntry.getObjectTag("script");
+            parsed.path = scriptEntry.getElement("path");
+            parsed.instant = scriptEntry.getElement("instant");
+            scriptEntry.internal.specialProcessedData = parsed;
+            scriptEntry.sharedInternal().specialProcessedData = parsed;
         }
     }
 

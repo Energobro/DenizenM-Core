@@ -36,7 +36,7 @@ public class ScriptEngine {
         // The thread check matters on top of the queue check: a plain (non-async) queue still runs on whichever thread started it,
         // which for a sub-queue built by an async script (a 'proc' tag, an 'inject', ...) is that script's worker thread.
         if (scriptQueue.isAsync() || !DenizenCore.isMainThread()) {
-            scriptEntry.makeAsyncSafe();
+            scriptEntry.makeAsyncSafe(scriptQueue);
         }
         scriptEntry.setSendingQueue(scriptQueue);
         scriptEntry.updateContext();

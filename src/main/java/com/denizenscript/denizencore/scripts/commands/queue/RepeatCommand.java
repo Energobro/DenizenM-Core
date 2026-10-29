@@ -152,6 +152,7 @@ public class RepeatCommand extends BracedCommand {
             if (valueHolder == null || !valueHolder.str.equals(asName)) {
                 valueHolder = new StringHolder(asName);
                 scriptEntry.internal.loopValueHolder = valueHolder;
+                scriptEntry.sharedInternal().loopValueHolder = valueHolder;
             }
             datum.valueHolder = valueHolder;
             scriptEntry.setData(datum);

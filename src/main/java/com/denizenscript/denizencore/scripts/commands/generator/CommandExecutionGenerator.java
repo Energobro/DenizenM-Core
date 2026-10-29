@@ -6,6 +6,7 @@ import com.denizenscript.denizencore.objects.ArgumentHelper;
 import com.denizenscript.denizencore.objects.ObjectTag;
 import com.denizenscript.denizencore.objects.core.ElementTag;
 import com.denizenscript.denizencore.objects.core.ListTag;
+import com.denizenscript.denizencore.objects.core.MapTag;
 import com.denizenscript.denizencore.scripts.ScriptEntry;
 import com.denizenscript.denizencore.scripts.commands.AbstractCommand;
 import com.denizenscript.denizencore.scripts.queues.ScriptQueue;
@@ -17,6 +18,7 @@ import com.denizenscript.denizencore.utilities.codegen.MethodGenerator;
 import com.denizenscript.denizencore.utilities.debugging.Debug;
 import com.denizenscript.denizencore.utilities.debugging.DebugInternals;
 import com.denizenscript.denizencore.utilities.debugging.Debuggable;
+import com.denizenscript.denizencore.utilities.text.StringHolder;
 import org.objectweb.asm.*;
 
 import java.lang.reflect.Method;
@@ -62,6 +64,7 @@ public class CommandExecutionGenerator {
     public static final Method HELPER_PREFIX_FLOAT_METHOD = getArgHelperMethod("helperPrefixFloat");
     public static final Method HELPER_PREFIX_DOUBLE_METHOD = getArgHelperMethod("helperPrefixDouble");
     public static final Method HELPER_PREFIX_ENUM_METHOD = getArgHelperMethod("helperPrefixEnum");
+    public static final Method HELPER_DYNAMIC_PREFIX_MAP_METHOD = getArgHelperMethod("helperDynamicPrefixMap");
     public static final Method HELPER_DEBUG_FORMAT_METHOD = ReflectionHelper.getMethod(CommandExecutionGenerator.class, "helperDebugFormat", Object.class, ArgData.class);
     public static final Method SCRIPTENTRY_SHOULDDEBUG_METHOD = ReflectionHelper.getMethod(ScriptEntry.class, "dbCallShouldDebug");
     public static final Method DEBUG_REPORT_METHOD = ReflectionHelper.getMethod(Debug.class, "report", Debuggable.class, String.class, Object[].class);
@@ -338,6 +341,46 @@ public class CommandExecutionGenerator {
         return ArgumentHelper.debugObj(arg.name, value);
     }
 
+    public static MapTag helperDynamicPrefixMap(ScriptEntry entry, ArgData arg) {
+        int[][] allIndices = entry.internal.dynamicPrefixArgs;
+        int[] indices = allIndices == null ? null : allIndices[arg.index];
+        if (indices == null) {
+            if (arg.required) {
+                throw new InvalidArgumentsRuntimeException("Must specify input to '" + arg.name + "' argument. Did you forget an argument? Check meta docs!");
+            }
+            return null;
+        }
+        StringHolder[] keys = entry.internal.dynamicPrefixKeys[arg.index];
+        String family = entry.internal.actualCommand.dynamicPrefixFamilies.get(arg.index);
+        MapTag result = new MapTag();
+        for (int i = 0; i < indices.length; i++) {
+            putDynamicPrefixed(result, entry.argAtIndex(entry.internal.all_arguments, indices[i]), keys[i], family);
+        }
+        return result;
+    }
+
+    public static void putDynamicPrefixed(MapTag map, Argument given, StringHolder knownKey, String family) {
+        if (given.prefix != null) {
+            if (knownKey != null) {
+                map.putObject(knownKey, given.object);
+                return;
+            }
+            if (given.prefix.length() > family.length() && given.prefix.startsWith(family)) {
+                map.putObject(given.prefix.substring(family.length()), given.object);
+                return;
+            }
+        }
+        else {
+            String raw = given.getRawValue();
+            int colon = raw.indexOf(':');
+            if (colon > family.length() && raw.startsWith(family)) {
+                map.putObject(knownKey != null ? knownKey : new StringHolder(raw.substring(family.length(), colon)), new ElementTag(raw.substring(colon + 1)));
+                return;
+            }
+        }
+        given.reportUnhandled();
+    }
+
     public static String getUnparsedPrefixedArg(ScriptEntry scriptEntry, ArgData arg) {
         Integer index = scriptEntry.internal.prefixedArgMapper[arg.index];
         if (index != null) {
@@ -383,6 +426,7 @@ public class CommandExecutionGenerator {
                     ArgDefaultText argDefaultText = param.getAnnotation(ArgDefaultText.class);
                     ArgLinear argLinear = param.getAnnotation(ArgLinear.class);
                     ArgSubType argSubType = param.getAnnotation(ArgSubType.class);
+                    ArgDynamicPrefix argDynamicPrefix = param.getAnnotation(ArgDynamicPrefix.class);
                     if (argName == null) {
                         Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + param.getName() + "' which lacks a proper naming parameter.");
                         return null;
@@ -427,7 +471,15 @@ public class CommandExecutionGenerator {
                     MethodGenerator.Local argLocal = gen.addLocal("arg_" + args.size() + "_" + CodeGenUtil.cleanName(argRealName), paramType);
                     Method argMethod = null;
                     boolean doCast = false;
-                    if (argPrefixed != null || argLinear != null) {
+                    if (argDynamicPrefix != null) {
+                        if (paramType != MapTag.class) {
+                            Debug.echoError("Cannot generate executor for command '" + cmdClass.getName() + "': autoExecute method has param '" + argRealName + "' which takes dynamic prefixes but is not a MapTag.");
+                            return null;
+                        }
+                        argIndex = cmd.setDynamicPrefixHandled(argDynamicPrefix.value());
+                        argMethod = HELPER_DYNAMIC_PREFIX_MAP_METHOD;
+                    }
+                    else if (argPrefixed != null || argLinear != null) {
                         if (argPrefixed != null) {
                             argIndex = cmd.setPrefixHandled(argRealName);
                         }

@@ -26,6 +26,8 @@ public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
 
         public boolean canExpire;
 
+        public volatile Object stamp;
+
         public MapTag getMap() {
             // Note: builds into a local first, so that another thread can never see a half-filled map through the volatile field.
             MapTag result = map;
@@ -45,6 +47,7 @@ public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
         public String getString() {
             String result = string;
             if (result == null) {
+                Object seenStamp = stamp;
                 MapTag mapCopy = map;
                 if (mapCopy.containsKey(expirationString) || mapCopy.getObject(valueString) instanceof MapTag) {
                     result = mapCopy.savable();
@@ -53,6 +56,9 @@ public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
                     result = mapCopy.getObject(valueString).savable();
                 }
                 string = result;
+                if (stamp != seenStamp) {
+                    string = null;
+                }
             }
             return result;
         }
@@ -201,6 +207,19 @@ public class SavableMapFlagTracker extends MapTagBasedFlagTracker {
             flag.canExpire = true;
         }
         map.put(key, flag);
+    }
+
+    @Override
+    public void republishRootMap(StringHolder key, MapTag value) {
+        SaveOptimizedFlag flag = map.get(key);
+        if (flag == null) {
+            setRootMap(key, value);
+            return;
+        }
+        modified = true;
+        flag.stamp = new Object();
+        flag.string = null;
+        flag.map = value;
     }
 
     @Override

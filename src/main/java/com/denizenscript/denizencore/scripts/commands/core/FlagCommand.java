@@ -166,41 +166,49 @@ public class FlagCommand extends AbstractCommand {
         tabCompleteFlag(tab);
     }
 
+    public static class FlagWork {
+        public ListTag targets;
+        public TimeTag expiration;
+        public DataAction action;
+    }
+
     @Override
     public void parseArgs(ScriptEntry scriptEntry) throws InvalidArgumentsException {
+        FlagWork work = new FlagWork();
+        scriptEntry.commandState = work;
         for (Argument arg : scriptEntry) {
-            if (!scriptEntry.hasObject("targets")
+            if (work.targets == null
                 && !arg.hasPrefix()) {
-                scriptEntry.addObject("targets", targetsFor(scriptEntry, arg));
+                work.targets = targetsFor(scriptEntry, arg);
             }
             else {
-                boolean expirationPrefix = !scriptEntry.hasObject("expiration") && arg.matchesPrefix("expire", "expires", "expiration", "duration");
+                boolean expirationPrefix = work.expiration == null && arg.matchesPrefix("expire", "expires", "expiration", "duration");
                 CachedAction knownDuration = expirationPrefix ? knownDurationFor(scriptEntry, arg) : null;
                 if (knownDuration != null) {
-                    scriptEntry.addObject("expiration", new TimeTag(DenizenCore.currentTimeMillis + knownDuration.expireMillis, ZoneId.systemDefault()));
+                    work.expiration = new TimeTag(DenizenCore.currentTimeMillis + knownDuration.expireMillis, ZoneId.systemDefault());
                     continue;
                 }
                 int expiration = expirationPrefix ? expirationKindOf(arg) : EXPIRATION_NONE;
                 if (expiration == EXPIRATION_TIME) {
-                    scriptEntry.addObject("expiration", arg.asType(TimeTag.class));
+                    work.expiration = arg.asType(TimeTag.class);
                 }
                 else if (expiration == EXPIRATION_DURATION) {
                     long millis = arg.asType(DurationTag.class).getMillis();
                     rememberDuration(scriptEntry, arg, millis);
-                    scriptEntry.addObject("expiration", new TimeTag(DenizenCore.currentTimeMillis + millis, ZoneId.systemDefault()));
+                    work.expiration = new TimeTag(DenizenCore.currentTimeMillis + millis, ZoneId.systemDefault());
                 }
-                else if (!scriptEntry.hasObject("flag_action")) {
-                    scriptEntry.addObject("flag_action", flagActionFor(scriptEntry, arg));
+                else if (work.action == null) {
+                    work.action = flagActionFor(scriptEntry, arg);
                 }
                 else {
                     arg.reportUnhandled();
                 }
             }
         }
-        if (!scriptEntry.hasObject("targets")) {
+        if (work.targets == null) {
             throw new InvalidArgumentsException("Must specify flag target(s)!");
         }
-        if (!scriptEntry.hasObject("flag_action")) {
+        if (work.action == null) {
             throw new InvalidArgumentsException("Must specify a flag to set!");
         }
     }
@@ -234,6 +242,7 @@ public class FlagCommand extends AbstractCommand {
         updated.expireText = arg.object.toString();
         updated.expireMillis = millis;
         scriptEntry.internal.specialProcessedData = updated;
+        scriptEntry.sharedInternal().specialProcessedData = updated;
     }
 
     public static class FlagActionProvider extends ActionableDataProvider {
@@ -379,6 +388,7 @@ public class FlagCommand extends AbstractCommand {
         updated.targetsText = text;
         updated.targets = parsed;
         scriptEntry.internal.specialProcessedData = updated;
+        scriptEntry.sharedInternal().specialProcessedData = updated;
         return parsed;
     }
 
@@ -438,6 +448,7 @@ public class FlagCommand extends AbstractCommand {
             updated.prefixIndex = parsed.index;
         }
         scriptEntry.internal.specialProcessedData = updated;
+        scriptEntry.sharedInternal().specialProcessedData = updated;
         return parsed;
     }
 
@@ -458,6 +469,7 @@ public class FlagCommand extends AbstractCommand {
         updated.objectKey = parsed.key;
         updated.objectIndex = parsed.index;
         scriptEntry.internal.specialProcessedData = updated;
+        scriptEntry.sharedInternal().specialProcessedData = updated;
         return parsed;
     }
 
@@ -478,7 +490,7 @@ public class FlagCommand extends AbstractCommand {
 
     @Override
     public void execute(ScriptEntry scriptEntry) {
-        ListTag targets = scriptEntry.getObjectTag("targets");
+        ListTag targets = ((FlagWork) scriptEntry.commandState).targets;
         if (!DenizenCore.isMainThread() && !canWriteOffThread(targets, scriptEntry)) {
             // Hands the line over as a whole, which is what an unmarked command would have cost anyway - one crossing, targets still in order.
             long startTime = System.nanoTime();
@@ -490,9 +502,14 @@ public class FlagCommand extends AbstractCommand {
     }
 
     public void writeFlags(ScriptEntry scriptEntry, ListTag targets) {
-        TimeTag expiration = scriptEntry.getObjectTag("expiration");
-        DataAction flagAction = (DataAction) scriptEntry.getObject("flag_action");
+        FlagWork work = (FlagWork) scriptEntry.commandState;
+        TimeTag expiration = work.expiration;
+        DataAction flagAction = work.action;
         if (scriptEntry.debugThisLine) {
+            targets.setPrefix("targets");
+            if (expiration != null) {
+                expiration.setPrefix("expiration");
+            }
             Debug.report(scriptEntry, getName(), targets, expiration, flagAction);
         }
         ((FlagActionProvider) flagAction.provider).expiration = expiration;

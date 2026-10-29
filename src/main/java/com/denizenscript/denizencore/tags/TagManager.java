@@ -407,7 +407,7 @@ public class TagManager {
                 ObjectTag definition;
                 if (provider instanceof ScriptQueue queue) {
                     definition = data.plainDefinitionPath != null
-                            ? queue.getDefinitionDeep(data.plainDefinitionPath)
+                            ? queue.getDefinitionDeepSlot(tag, data.plainDefinitionPath)
                             : queue.getDefinitionSlot(tag, data.plainDefinitionKey);
                 }
                 else {

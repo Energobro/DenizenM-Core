@@ -5,13 +5,23 @@ import com.denizenscript.denizencore.utilities.debugging.Debug;
 import java.lang.reflect.Field;
 import java.lang.reflect.Modifier;
 import java.util.HashMap;
+import java.util.concurrent.ConcurrentHashMap;
 
 public class EnumHelper<T> {
 
     public static HashMap<Class<?>, EnumHelper<?>> helpers = new HashMap<>();
 
+    private static final ConcurrentHashMap<Class<?>, EnumHelper<?>> lookup = new ConcurrentHashMap<>();
+
     public static <T> EnumHelper<T> get(Class<T> enumClass) {
-        return (EnumHelper<T>) helpers.computeIfAbsent(enumClass, EnumHelper::new);
+        EnumHelper<?> helper = lookup.get(enumClass);
+        if (helper == null) {
+            synchronized (helpers) {
+                helper = helpers.computeIfAbsent(enumClass, EnumHelper::new);
+            }
+            lookup.put(enumClass, helper);
+        }
+        return (EnumHelper<T>) helper;
     }
 
     public static String cleanKey(String name) {

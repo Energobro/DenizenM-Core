@@ -226,6 +226,7 @@ public class CommandExecutor {
      */
     public static boolean executeDeferred(ScriptEntry scriptEntry) {
         AbstractCommand command = scriptEntry.internal.actualCommand;
+        scriptEntry.internal.asyncCopyPinned = true;
         scriptEntry.debugThisLine = scriptEntry.dbCallShouldDebug();
         if (scriptEntry.debugThisLine) {
             debugSingleExecution(scriptEntry);

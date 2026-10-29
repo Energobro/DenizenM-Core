@@ -115,15 +115,70 @@ public class DataAction {
         }
     }
 
+    private static final int LONG_ADD = 0, LONG_SUBTRACT = 1, LONG_MULTIPLY = 2;
+
+    private static Long plainLongOf(ObjectTag object) {
+        if (object == null) {
+            return 0L;
+        }
+        return object instanceof ElementTag element ? element.asPlainLong() : null;
+    }
+
+    private boolean tryLongMath(TagContext context, ObjectTag operand, int operation) {
+        if (index != 0 || getClass() != DataAction.class) {
+            return false;
+        }
+        Long right = operand == null ? Long.valueOf(1L) : operand instanceof ElementTag element ? element.asPlainLong() : null;
+        ObjectTag current = provider.getValueAt(key);
+        Long left = right == null ? null : plainLongOf(current);
+        if (left == null) {
+            return tryFixedMath(current, operand, operation);
+        }
+        long result;
+        try {
+            result = switch (operation) {
+                case LONG_ADD -> Math.addExact(left, right);
+                case LONG_SUBTRACT -> Math.subtractExact(left, right);
+                default -> Math.multiplyExact(left, right);
+            };
+        }
+        catch (ArithmeticException ex) {
+            return false;
+        }
+        ElementTag element = new ElementTag(result);
+        element.setPrefix("decimal");
+        provider.setValueAt(key, element);
+        return true;
+    }
+
+    private boolean tryFixedMath(ObjectTag current, ObjectTag operand, int operation) {
+        if (!(current instanceof ElementTag left) || !(operand instanceof ElementTag right)
+                || CoreUtilities.contains(left.asString(), '%') || CoreUtilities.contains(right.asString(), '%')) {
+            return false;
+        }
+        ElementTag result = operation == LONG_MULTIPLY ? ElementTag.fixedProduct(left, right) : ElementTag.fixedSum(left, right, operation == LONG_SUBTRACT);
+        if (result == null) {
+            return false;
+        }
+        provider.setValueAt(key, result);
+        return true;
+    }
+
     public void execute(TagContext context) {
         switch (type) {
             case INCREMENT: {
+                if (tryLongMath(context, null, LONG_ADD)) {
+                    break;
+                }
                 BigDecimal num = autoNumber(context);
                 num = num.add(BigDecimal.ONE);
                 autoSet(autoNumber(num), context);
                 break;
             }
             case DECREMENT: {
+                if (tryLongMath(context, null, LONG_SUBTRACT)) {
+                    break;
+                }
                 BigDecimal num = autoNumber(context);
                 num = num.subtract(BigDecimal.ONE);
                 autoSet(autoNumber(num), context);
@@ -131,6 +186,9 @@ public class DataAction {
             }
             case ADD: {
                 requiresInputValue();
+                if (tryLongMath(context, inputValue, LONG_ADD)) {
+                    break;
+                }
                 BigDecimal num = autoNumber(context);
                 num = num.add(autoNumber(inputValue));
                 autoSet(autoNumber(num), context);
@@ -138,6 +196,9 @@ public class DataAction {
             }
             case SUBTRACT: {
                 requiresInputValue();
+                if (tryLongMath(context, inputValue, LONG_SUBTRACT)) {
+                    break;
+                }
                 BigDecimal num = autoNumber(context);
                 num = num.subtract(autoNumber(inputValue));
                 autoSet(autoNumber(num), context);
@@ -145,6 +206,9 @@ public class DataAction {
             }
             case MULTIPLY: {
                 requiresInputValue();
+                if (tryLongMath(context, inputValue, LONG_MULTIPLY)) {
+                    break;
+                }
                 BigDecimal num = autoNumber(context);
                 num = num.multiply(autoNumber(inputValue));
                 autoSet(autoNumber(num), context);

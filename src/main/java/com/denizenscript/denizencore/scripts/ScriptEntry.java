@@ -30,6 +30,7 @@ import com.denizenscript.denizencore.utilities.text.StringHolder;
 
 import java.util.*;
 import java.util.concurrent.atomic.AtomicLongFieldUpdater;
+import java.util.concurrent.atomic.AtomicReferenceFieldUpdater;
 
 /**
  * ScriptEntry contain information about a single entry from a dScript. It is used
@@ -94,6 +95,10 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
         public Integer[] prefixedArgMapper = null;
 
+        public int[][] dynamicPrefixArgs = null;
+
+        public StringHolder[][] dynamicPrefixKeys = null;
+
         public byte shouldDebugState = 0;
 
         public Boolean shouldDebugBool = null;
@@ -151,6 +156,43 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
          */
         public ScriptEntryInternal asyncSourceInternal = null;
 
+        public volatile ScriptEntryInternal spareAsyncCopy = null;
+
+        public boolean asyncCopyPinned = false;
+
+        public static final AtomicReferenceFieldUpdater<ScriptEntryInternal, ScriptEntryInternal> SPARE_ASYNC_COPY = AtomicReferenceFieldUpdater.newUpdater(ScriptEntryInternal.class, ScriptEntryInternal.class, "spareAsyncCopy");
+
+        public void copyLineFieldsFrom(ScriptEntryInternal from) {
+            command = from.command;
+            actualCommand = from.actualCommand;
+            pre_tagged_args = from.pre_tagged_args;
+            bracedSet = from.bracedSet;
+            raw_input_args = from.raw_input_args;
+            script = from.script;
+            yamlSubcontent = from.yamlSubcontent;
+            instant = from.instant;
+            waitfor = from.waitfor;
+            hasTags = from.hasTags;
+            specialProcessedData = from.specialProcessedData;
+            loopValueHolder = from.loopValueHolder;
+            loopKeyHolder = from.loopKeyHolder;
+            slotTable = from.slotTable;
+            originalLine = from.originalLine;
+            lineNumber = from.lineNumber;
+            brokenArgs = from.brokenArgs;
+            argPrefixMap = from.argPrefixMap;
+            prefixedArgMapper = from.prefixedArgMapper;
+            dynamicPrefixArgs = from.dynamicPrefixArgs;
+            dynamicPrefixKeys = from.dynamicPrefixKeys;
+            shouldDebugState = from.shouldDebugState;
+            shouldDebugBool = from.shouldDebugBool;
+            defObjects = from.defObjects;
+            asyncBlockMaxNanos = from.asyncBlockMaxNanos;
+            waitedMaxNanos = from.waitedMaxNanos;
+            asyncBlockRuns = from.asyncBlockRuns;
+            waitedRuns = from.waitedRuns;
+        }
+
         /**
          * Creates a copy of this internal data with its own private argument objects.
          * <p>
@@ -162,32 +204,9 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             ScriptEntryInternal result = new ScriptEntryInternal();
             // Chains of duplicates all point at the one original, so per-line state stays in a single place no matter how the entry got here.
             result.asyncSourceInternal = asyncSourceInternal != null ? asyncSourceInternal : this;
-            result.command = command;
-            result.actualCommand = actualCommand;
-            result.pre_tagged_args = pre_tagged_args;
-            result.bracedSet = bracedSet;
-            result.raw_input_args = raw_input_args;
-            result.script = script;
-            result.yamlSubcontent = yamlSubcontent;
-            result.instant = instant;
-            result.waitfor = waitfor;
-            result.hasTags = hasTags;
-            result.specialProcessedData = specialProcessedData;
-            result.slotTable = slotTable;
-            result.originalLine = originalLine;
-            result.lineNumber = lineNumber;
-            result.brokenArgs = brokenArgs;
-            result.argPrefixMap = argPrefixMap;
-            result.prefixedArgMapper = prefixedArgMapper;
+            result.copyLineFieldsFrom(this);
             result.enumVals = enumVals == null ? null : enumVals.clone();
             result.booleans = booleans == null ? null : booleans.clone();
-            result.shouldDebugState = shouldDebugState;
-            result.shouldDebugBool = shouldDebugBool;
-            result.defObjects = defObjects;
-            result.asyncBlockMaxNanos = asyncBlockMaxNanos;
-            result.waitedMaxNanos = waitedMaxNanos;
-            result.asyncBlockRuns = asyncBlockRuns;
-            result.waitedRuns = waitedRuns;
             if (preprocArgs != null) {
                 result.preprocArgs = new ArrayList<>(preprocArgs.size());
                 for (Argument arg : preprocArgs) {
@@ -319,6 +338,26 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
         internal = internal.duplicateForAsync();
         internal.asyncOwner = this;
         internal.argumentIterator = new ArgumentIterator(this);
+    }
+
+    public void makeAsyncSafe(ScriptQueue leasingQueue) {
+        if (internal.asyncOwner == this) {
+            return;
+        }
+        ScriptEntryInternal source = sharedInternal();
+        ScriptEntryInternal copy = source.spareAsyncCopy == null ? null : ScriptEntryInternal.SPARE_ASYNC_COPY.getAndSet(source, null);
+        if (copy == null) {
+            copy = internal.duplicateForAsync();
+            copy.argumentIterator = new ArgumentIterator(this);
+        }
+        else {
+            copy.copyLineFieldsFrom(source);
+            copy.argumentIterator.entry = this;
+        }
+        copy.asyncOwner = this;
+        copy.asyncCopyPinned = false;
+        internal = copy;
+        leasingQueue.leaseAsyncCopy(copy);
     }
 
     @Override
@@ -455,6 +494,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
 
     private Object data;
 
+    public Object commandState;
+
     public boolean forceInstant = false;
 
     private ScriptEntry owner = null;
@@ -474,6 +515,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             objects.clear();
         }
         data = null;
+        commandState = null;
         saveName = null;
     }
 
@@ -530,7 +572,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             ScriptEntry se = (ScriptEntry) super.clone();
             se.inlinedBody = null;
             se.inlinedBranches = null;
-            se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
+            se.objects = null;
             se.entryData = entryData.clone();
             se.entryData.scriptEntry = se;
             se.updateContext();
@@ -557,7 +599,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             ScriptEntry se = (ScriptEntry) super.clone();
             se.inlinedBody = null;
             se.inlinedBranches = null;
-            se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
+            se.objects = null;
             se.entryData = data.clone();
             if (intoQueue != null) {
                 se.setSendingQueue(intoQueue);
@@ -576,7 +618,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             ScriptEntry se = (ScriptEntry) super.clone();
             se.inlinedBody = null;
             se.inlinedBranches = null;
-            se.objects = internal.defObjects == 0 ? null : new HashMap<>(internal.defObjects);
+            se.objects = null;
             se.entryData = copyFrom.entryData.clone();
             se.setSendingQueue(copyFrom.getResidingQueue());
             se.updateContext();
@@ -728,6 +770,8 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             nested_depth = 0;
             TagContext refContext = DenizenCore.implementation.getTagContext(this);
             ArrayList<InternalArgument> allArgs = new ArrayList<>(internal.pre_tagged_args.size());
+            ArrayList<int[]> dynamicFound = null;
+            ArrayList<StringHolder> dynamicKeys = null;
             for (int i = 0; i < internal.pre_tagged_args.size(); i++) {
                 String arg = internal.pre_tagged_args.get(i);
                 if (arg.equals("{")) {
@@ -829,6 +873,51 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
                         }
                     }
                 }
+                if (first_colon > 0 && internal.actualCommand != null && !internal.actualCommand.dynamicPrefixFamilies.isEmpty()) {
+                    String head = argVal.fullOriginalRawValue.substring(0, first_colon);
+                    List<String> families = internal.actualCommand.dynamicPrefixFamilies;
+                    for (int f = 0; f < families.size(); f++) {
+                        String family = families.get(f);
+                        if (head.length() > family.length() && head.startsWith(family)) {
+                            argVal.shouldUse = false;
+                            if (dynamicFound == null) {
+                                dynamicFound = new ArrayList<>();
+                                dynamicKeys = new ArrayList<>();
+                            }
+                            dynamicFound.add(new int[] {f, i});
+                            dynamicKeys.add(head.indexOf('<') < 0 ? new StringHolder(head.substring(family.length())) : null);
+                            break;
+                        }
+                    }
+                }
+            }
+            if (dynamicFound != null) {
+                int familyCount = internal.actualCommand.dynamicPrefixFamilies.size();
+                internal.dynamicPrefixArgs = new int[familyCount][];
+                internal.dynamicPrefixKeys = new StringHolder[familyCount][];
+                for (int f = 0; f < familyCount; f++) {
+                    int count = 0;
+                    for (int[] found : dynamicFound) {
+                        if (found[0] == f) {
+                            count++;
+                        }
+                    }
+                    if (count == 0) {
+                        continue;
+                    }
+                    int[] indices = new int[count];
+                    StringHolder[] keys = new StringHolder[count];
+                    int filled = 0;
+                    for (int j = 0; j < dynamicFound.size(); j++) {
+                        if (dynamicFound.get(j)[0] == f) {
+                            indices[filled] = dynamicFound.get(j)[1];
+                            keys[filled] = dynamicKeys.get(j);
+                            filled++;
+                        }
+                    }
+                    internal.dynamicPrefixArgs[f] = indices;
+                    internal.dynamicPrefixKeys[f] = keys;
+                }
             }
             internal.all_arguments = allArgs.toArray(new InternalArgument[0]);
             ArrayList<InternalArgument> argsToUse = new ArrayList<>(internal.all_arguments.length);
@@ -899,7 +988,7 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
             ((ObjectTag) object).setPrefix(key);
         }
         if (objects == null) {
-            objects = new HashMap<>(internal.defObjects);
+            objects = new HashMap<>(8);
         }
         objects.put(key, object);
         return this;
@@ -986,6 +1075,9 @@ public class ScriptEntry implements Cloneable, Debuggable, Iterable<Argument> {
     @Deprecated
     public <T> T getObjectTag(String key) {
         try {
+            if (objects == null) {
+                return null;
+            }
             Object gotten = objects.get(key);
             if (gotten == null) {
                 return null;

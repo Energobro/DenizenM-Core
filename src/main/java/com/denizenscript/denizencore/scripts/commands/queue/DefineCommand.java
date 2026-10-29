@@ -196,6 +196,7 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         public final StringHolder[] path;
         public int slot = DefinitionSlots.NO_SLOT;
         public int resolvedAtSize = -1;
+        public volatile ElementTag numberInput;
 
         public CachedAction(String prefix, boolean exact, DataAction parsed) {
             this.prefix = prefix;
@@ -237,6 +238,7 @@ public class DefineCommand extends AbstractCommand implements Holdable {
         CachedKey cached = newKey(scriptEntry, defName);
         if (cached.fixed || cached.hasColon) {
             scriptEntry.internal.specialProcessedData = cached;
+            scriptEntry.sharedInternal().specialProcessedData = cached;
         }
         return cached;
     }
@@ -273,8 +275,17 @@ public class DefineCommand extends AbstractCommand implements Holdable {
             action.index = known.index;
             action.type = known.type;
             if (!known.exact) {
-                String rest = defName.substring(known.prefix.length());
-                action.inputValue = known.type == DataActionType.INSERT ? ObjectFetcher.pickObjectFor(rest, scriptEntry.context) : new ElementTag(rest);
+                ElementTag number = known.numberInput;
+                if (number != null && defName.length() == known.prefix.length() + number.asString().length() && defName.endsWith(number.asString())) {
+                    action.inputValue = number;
+                }
+                else {
+                    String rest = defName.substring(known.prefix.length());
+                    action.inputValue = known.type == DataActionType.INSERT ? ObjectFetcher.pickObjectFor(rest, scriptEntry.context) : new ElementTag(rest);
+                    switch (known.type) {
+                        case ADD, SUBTRACT, MULTIPLY, DIVIDE -> known.numberInput = (ElementTag) action.inputValue;
+                    }
+                }
             }
             if (known.plainKey != null) {
                 int size = ScriptQueue.tableSizeFor(scriptEntry);

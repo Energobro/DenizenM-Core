@@ -175,6 +175,7 @@ public class IfCommand extends BracedCommand {
         List<String> conditionArgs = leadWord.equals("else") ? (parsed.bracedArgs.size() > 2 ? parsed.bracedArgs.subList(2, parsed.bracedArgs.size()) : null) : parsed.comparisons;
         parsed.condition = conditionArgs == null ? null : ArgComparer.compile(conditionArgs);
         entry.internal.specialProcessedData = parsed;
+        entry.sharedInternal().specialProcessedData = parsed;
         return parsed;
     }
 
@@ -462,6 +463,7 @@ public class IfCommand extends BracedCommand {
         }
         Condition compiled = ArgComparer.compile(args);
         cacheEntry.internal.specialProcessedData = compiled;
+        cacheEntry.sharedInternal().specialProcessedData = compiled;
         return compiled;
     }
 

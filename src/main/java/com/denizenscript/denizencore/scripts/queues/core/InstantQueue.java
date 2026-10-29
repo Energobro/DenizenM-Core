@@ -16,9 +16,12 @@ public class InstantQueue extends ScriptQueue {
             while (is_started) {
                 if (!hasMoreWork() && holdingOn == null) {
                     stop();
-                    return;
+                    break;
                 }
                 ScriptEngine.revolve(this);
+            }
+            if (replacementQueue == null) {
+                releaseAsyncCopies();
             }
         }
         finally {

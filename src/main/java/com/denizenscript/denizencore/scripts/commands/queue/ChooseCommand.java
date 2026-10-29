@@ -112,6 +112,7 @@ public class ChooseCommand extends BracedCommand {
                 }
             }
             scriptEntry.internal.specialProcessedData = lookupTable;
+            scriptEntry.sharedInternal().specialProcessedData = lookupTable;
         }
         String choice_low = choice.asLowerString();
         Integer resultIndex = lookupTable.get(choice_low);

@@ -161,6 +161,13 @@ public abstract class AbstractCommand {
 
     public boolean generateDebug = true;
 
+    public ArrayList<String> dynamicPrefixFamilies = new ArrayList<>();
+
+    public int setDynamicPrefixHandled(String family) {
+        dynamicPrefixFamilies.add(family);
+        return dynamicPrefixFamilies.size() - 1;
+    }
+
     public void addRemappedPrefixes(String realName, String... alts) {
         Integer oldIndex = prefixesHandled.get(realName);
         int index = oldIndex != null ? oldIndex : prefixesThusFar++;

@@ -417,6 +417,14 @@ public class ElementTag implements ObjectTag {
         return fixedResult(unscaled, scale);
     }
 
+    public static ElementTag fixedSum(ElementTag first, ElementTag second, boolean subtract) {
+        return first.resolveFixed() && second.resolveFixed() ? fixedAddSub(first, second, subtract) : null;
+    }
+
+    public static ElementTag fixedProduct(ElementTag first, ElementTag second) {
+        return first.resolveFixed() && second.resolveFixed() ? fixedMultiply(first, second) : null;
+    }
+
     private BigDecimal parsedDecimal() {
         BigDecimal parsed = decimalCache;
         if (parsed == null) {

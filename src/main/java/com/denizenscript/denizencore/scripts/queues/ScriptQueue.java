@@ -267,6 +267,29 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     public ScriptQueue replacementQueue = null;
 
+    public ArrayList<ScriptEntry.ScriptEntryInternal> asyncCopies = null;
+
+    public void leaseAsyncCopy(ScriptEntry.ScriptEntryInternal copy) {
+        if (asyncCopies == null) {
+            asyncCopies = new ArrayList<>();
+        }
+        asyncCopies.add(copy);
+    }
+
+    public void releaseAsyncCopies() {
+        ArrayList<ScriptEntry.ScriptEntryInternal> copies = asyncCopies;
+        if (copies == null) {
+            return;
+        }
+        asyncCopies = null;
+        for (ScriptEntry.ScriptEntryInternal copy : copies) {
+            if (!copy.asyncCopyPinned && copy.asyncSourceInternal != null) {
+                copy.asyncOwner = null;
+                copy.asyncSourceInternal.spareAsyncCopy = copy;
+            }
+        }
+    }
+
     public volatile boolean is_stopping = false;
 
     public volatile boolean isStopped = false;
@@ -488,6 +511,29 @@ public abstract class ScriptQueue implements Debuggable, DefinitionProvider {
 
     public ObjectTag getDefinitionDeep(StringHolder[] path) {
         return definitions().getDeepObject(path);
+    }
+
+    public ObjectTag getDefinitionDeepSlot(TagManager.ParseableTagPiece tag, StringHolder[] path) {
+        DefinitionSlots table = definitions().boundTable();
+        if (table == null) {
+            return getDefinitionDeep(path);
+        }
+        TagManager.SlotBinding binding = bindingFor(table, tag.binding, path[0]);
+        tag.binding = binding;
+        if (binding.slot == DefinitionSlots.NO_SLOT) {
+            return getDefinitionDeep(path);
+        }
+        ObjectTag current = definitions().getSlot(table, binding.slot, path[0]);
+        for (int i = 1; i < path.length; i++) {
+            if (!(current instanceof MapTag subMap)) {
+                return null;
+            }
+            current = subMap.getObject(path[i]);
+            if (current == null) {
+                return null;
+            }
+        }
+        return current;
     }
 
     public void addDefinitionDeep(StringHolder[] path, ObjectTag value) {

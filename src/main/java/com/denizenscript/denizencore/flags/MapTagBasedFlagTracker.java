@@ -31,7 +31,7 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
 
     public ObjectTag getFlagValueOfType(String key, StringHolder type) {
         if (CoreUtilities.contains(key, '.')) {
-            return getDeepFlagValueOfType(CoreUtilities.split(key, '.'), type);
+            return getDeepFlagValueOfType(pathFor(key).holders, type);
         }
         MapTag map = getRootMap(key);
         if (map == null) {
@@ -278,8 +278,42 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
             if (resultMap != null && setDeepFlagInPlace(path, resultMap)) {
                 return;
             }
+            if (resultMap == null && isDeepRemovalNoop(path)) {
+                return;
+            }
             setDeepFlagRebuilding(path.parts, resultMap);
         }
+    }
+
+    public boolean isDeepRemovalNoop(FlagPath path) {
+        StringHolder[] keys = path.holders;
+        MapTag flagMap = getRootMap(keys[0]);
+        if (flagMap == null) {
+            return false;
+        }
+        MapTag map = null;
+        for (int i = 0; i < keys.length - 1; i++) {
+            if (i > 0) {
+                ObjectTag subFlagMap = map.getObject(keys[i]);
+                if (!(subFlagMap instanceof MapTag)) {
+                    return false;
+                }
+                flagMap = (MapTag) subFlagMap;
+            }
+            if (flagMap.containsKey(expirationString)) {
+                return false;
+            }
+            ObjectTag innerMapTag = flagMap.getObject(valueString);
+            if (!(innerMapTag instanceof MapTag)) {
+                return false;
+            }
+            map = (MapTag) innerMapTag;
+        }
+        return !map.containsKey(keys[keys.length - 1]);
+    }
+
+    public void republishRootMap(StringHolder key, MapTag value) {
+        setRootMap(key, value);
     }
 
     public static final class FlagPath {
@@ -347,7 +381,7 @@ public abstract class MapTagBasedFlagTracker extends AbstractFlagTracker {
         }
         VarHandle.releaseFence();
         map.putObject(endKey, resultMap);
-        setRootMap(keys[0], rootMap);
+        republishRootMap(keys[0], rootMap);
         return true;
     }
 
